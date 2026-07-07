@@ -1,0 +1,91 @@
+suite: microservice chart
+templates:
+  - templates/deployment.yaml
+  - templates/rollout.yaml
+  - templates/hpa.yaml
+  - templates/pdb.yaml
+tests:
+  - it: hardens the container (restricted PSA) by default
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - contains:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          content: ALL
+
+  - it: does not mount a service-account token (apps never call the API)
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: scales the Deployment to 0 when the Rollout owns the pods
+    template: templates/deployment.yaml
+    set:
+      rollout.enabled: true
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 0
+
+  - it: pins Deployment replicas only when neither rollout nor hpa own the count
+    template: templates/deployment.yaml
+    set:
+      rollout.enabled: false
+      hpa.enabled: false
+      replicaCount: 4
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 4
+
+  - it: renders a blue-green Rollout with a preview service + auto-promote (dev/staging)
+    template: templates/rollout.yaml
+    set:
+      rollout.enabled: true
+    asserts:
+      - isKind:
+          of: Rollout
+      - equal:
+          path: spec.strategy.blueGreen.previewService
+          value: RELEASE-NAME-microservice-preview
+      - equal:
+          path: spec.strategy.blueGreen.autoPromotionEnabled
+          value: true
+
+  - it: honours the prod manual-promotion gate
+    template: templates/rollout.yaml
+    set:
+      rollout.enabled: true
+      rollout.autoPromotionEnabled: false
+    asserts:
+      - equal:
+          path: spec.strategy.blueGreen.autoPromotionEnabled
+          value: false
+
+  - it: HPA targets the Rollout (not the Deployment) when blue-green is on
+    template: templates/hpa.yaml
+    set:
+      rollout.enabled: true
+      hpa.enabled: true
+    asserts:
+      - equal:
+          path: spec.scaleTargetRef.kind
+          value: Rollout
+
+  - it: renders no PDB when disabled (dev overlay)
+    template: templates/pdb.yaml
+    set:
+      podDisruptionBudget.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

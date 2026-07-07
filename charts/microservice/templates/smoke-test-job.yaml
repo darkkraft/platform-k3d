@@ -1,0 +1,53 @@
+{{- if .Values.smokeTest.enabled }}
+# ArgoCD PostSync hook: validate the freshly-synced service answers /readyz +
+# /healthz. Replaces the old imperative `make test`; a failure marks the sync
+# Degraded in ArgoCD. Restricted-PSA compliant (non-root, read-only rootfs).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "microservice.fullname" . }}-smoke
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 2
+  # Cold-cluster warmup (CNPG init + ESO secret + DB connect) can take minutes;
+  # give the readiness poll room so the hook doesn't fail before the app is up.
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "microservice.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: smoke
+          image: {{ .Values.smokeTest.image }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              url="http://{{ include "microservice.fullname" . }}:{{ .Values.service.port }}"
+              echo "smoke: waiting up to ~6m for $url/readyz (tolerates connection-refused during warmup)"
+              for i in $(seq 1 90); do curl -fsS "$url/readyz" && break; sleep 4; done
+              curl -fsS "$url/readyz"
+              curl -fsS "$url/healthz"
+              echo "smoke: OK"
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
+{{- end }}

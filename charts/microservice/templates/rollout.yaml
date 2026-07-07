@@ -1,0 +1,41 @@
+{{- if .Values.rollout.enabled }}
+# Argo Rollouts blue-green. Instead of duplicating the pod spec, the Rollout
+# references the Deployment (workloadRef) and reads its template; Argo Rollouts
+# then owns the replicas (scaling the Deployment to 0) and runs the blue-green
+# strategy: a new version (green) comes up beside the live one (blue) and the
+# preview Service points at green for health-checking BEFORE any traffic moves.
+# If green never becomes Ready it is never promoted — traffic stays on blue,
+# i.e. automatic, zero-downtime rollback.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "microservice.fullname" . }}-rollout
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.hpa.enabled }}
+  replicas: {{ .Values.replicaCount }}   # HPA owns replicas when enabled
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "microservice.selectorLabels" . | nindent 6 }}
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "microservice.fullname" . }}
+    scaleDown: onsuccess   # scale the referenced Deployment to 0 once the Rollout owns the pods
+  strategy:
+    blueGreen:
+      activeService: {{ include "microservice.fullname" . }}
+      previewService: {{ include "microservice.fullname" . }}-preview
+      # dev/staging auto-promote once green is healthy; the prod overlay sets this
+      # false (manual promotion gate — prod's explicit promotion control).
+      autoPromotionEnabled: {{ .Values.rollout.autoPromotionEnabled }}
+      # keep the old (blue) ReplicaSet briefly after promotion for instant abort.
+      scaleDownDelaySeconds: {{ .Values.rollout.scaleDownDelaySeconds | default 30 }}
+      # Promotion gate: the green ReplicaSet must become fully Available (all pods
+      # pass the readiness probe = /readyz, i.e. DB reachable) before promotion.
+      # dev/staging then auto-promote; prod requires a manual promotion (below).
+      # A metric-based prePromotionAnalysis (Prometheus error-rate/latency) is the
+      # documented next step for a true canary — see docs/RUNBOOK.md (Deploy safety & rollback).
+{{- end }}

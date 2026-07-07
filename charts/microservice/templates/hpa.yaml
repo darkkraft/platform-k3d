@@ -1,0 +1,35 @@
+{{- if .Values.hpa.enabled }}
+# Horizontal Pod Autoscaler. Scales on CPU utilisation (needs resource requests,
+# which are set). Targets the Argo Rollout when blue-green is enabled (Rollouts
+# integrates with the HPA), else the Deployment. When the HPA owns the replica
+# count the workload must NOT pin spec.replicas (see rollout.yaml/deployment.yaml).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "microservice.fullname" . }}
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    {{- if .Values.rollout.enabled }}
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: {{ include "microservice.fullname" . }}-rollout
+    {{- else }}
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "microservice.fullname" . }}
+    {{- end }}
+  minReplicas: {{ .Values.hpa.minReplicas }}
+  maxReplicas: {{ .Values.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.hpa.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # avoid flapping
+{{- end }}

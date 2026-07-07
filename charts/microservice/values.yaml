@@ -1,0 +1,179 @@
+# Default values for the microservice chart.
+# Per-service and per-environment overrides live in gitops/config/<service>/.
+
+# -- Number of replicas. HA default; single-replica only for dev overlays.
+replicaCount: 2
+
+image:
+  repository: api-service
+  # Prefer an immutable digest in real environments; tag is the CI-provided SHA.
+  # Default is EMPTY on purpose — the helper then falls back to the chart
+  # appVersion (never ":latest", so the Kyverno/plan-time disallow-latest holds
+  # even if an overlay forgets to set it). Real overlays set a concrete tag/SHA.
+  tag: ""
+  digest: ""
+  # k3s shares the Docker daemon, so local images resolve with IfNotPresent.
+  # CI-built images pushed to a registry should use IfNotPresent too (immutable tags).
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # The apps do not call the Kubernetes API; do not mount a token they cannot need.
+  automountServiceAccountToken: false
+
+# Additional pod labels/annotations (e.g. for scrape config or rollout triggers).
+podAnnotations: {}
+podLabels: {}
+
+# Pod-level security context — satisfies the "restricted" Pod Security Standard.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532 # distroless "nonroot"
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context — locked down, read-only root fs.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# Port the container listens on (matches the app's PORT env).
+containerPort: 8080
+
+service:
+  type: ClusterIP
+  port: 8080
+  # Named so ServiceMonitor/NetworkPolicy can target it by name.
+  portName: http
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations: {}
+  # sslip.io resolves *.127.0.0.1.sslip.io -> 127.0.0.1, giving hostname-based
+  # routing through k3s Traefik without editing /etc/hosts.
+  host: api.127.0.0.1.sslip.io
+  path: /
+  pathType: Prefix
+  tls: []
+
+# Resource requests/limits. Requests sized for the small workload; limits set to
+# prevent a noisy-neighbour from starving the sandbox node.
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
+
+# Probes. /healthz = process liveness; /readyz = dependency (DB) readiness.
+# startupProbe gives the app time to retry the DB connection before liveness
+# begins, so slow DB availability never triggers a crash loop.
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  periodSeconds: 3
+  failureThreshold: 30 # up to 90s to become live
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+# Roll safely: never drop below desired count while updating. Used by the plain
+# Deployment; when rollout.enabled the Argo Rollout drives the blue-green instead.
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+# Deployment safety: fail a stuck rollout instead of hanging forever.
+progressDeadlineSeconds: 120
+
+# Blue-green deploys via Argo Rollouts. The Rollout references the Deployment
+# (workloadRef) and swaps traffic active<->preview only after green is healthy —
+# a bad version never receives traffic (automatic, zero-downtime rollback).
+rollout:
+  enabled: true
+  # dev/staging auto-promote once green is healthy; prod overlay sets false
+  # (manual promotion gate).
+  autoPromotionEnabled: true
+  # keep the previous (blue) ReplicaSet this long after promotion for instant abort.
+  scaleDownDelaySeconds: 30
+
+# Horizontal autoscaling on CPU. When enabled the HPA owns the replica count, so
+# the workload does not pin spec.replicas (replicaCount becomes the floor via
+# minReplicas). Needs metrics-server (ships with k3s).
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 80
+
+# Plain env vars (non-secret). Generic defaults; per-service overlays set DB_NAME etc.
+env:
+  DB_HOST: platform-db-rw
+  DB_PORT: "5432"
+  DB_SSLMODE: require
+
+# envFrom sources — the ESO-materialised DB credentials Secret. EMPTY by default:
+# this is a GENERIC chart, so each service's overlay declares its own secret
+# (gitops/config/<svc>/values.yaml sets `<svc>-db`). A service-specific name here
+# would be a footgun for the next service that reuses the chart.
+envFrom: []
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceMonitor:
+  enabled: true
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: 10s
+
+# ArgoCD PostSync smoke test (deployment validation). Enabled per-service in the
+# gitops/config/<svc> overlays.
+smokeTest:
+  enabled: false
+  image: curlimages/curl:8.11.1
+
+# Spread replicas across nodes/zones where possible; soft so single-node k3s
+# still schedules.
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector: {} # filled with selector labels by the template
+
+nodeSelector: {}
+tolerations: []
+topologySpreadConstraints: []

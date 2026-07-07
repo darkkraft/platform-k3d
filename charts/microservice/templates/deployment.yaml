@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "microservice.fullname" . }}
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.rollout.enabled }}
+  replicas: 0   # the Rollout (workloadRef) owns replicas and scales this to 0
+  {{- else if not .Values.hpa.enabled }}
+  replicas: {{ .Values.replicaCount }}   # (HPA owns replicas when enabled)
+  {{- end }}
+  progressDeadlineSeconds: {{ .Values.progressDeadlineSeconds | default 120 }}
+  strategy:
+    {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "microservice.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "microservice.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "microservice.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ include "microservice.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: {{ .Values.service.portName }}
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          {{- with .Values.env }}
+          env:
+            {{- range $k, $v := . }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          # readOnlyRootFilesystem is on; provide a writable scratch tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.affinity }}
+      affinity:
+        {{- if .Values.affinity.podAntiAffinity }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            {{- range .Values.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution }}
+            - weight: {{ .weight }}
+              podAffinityTerm:
+                topologyKey: {{ .podAffinityTerm.topologyKey }}
+                labelSelector:
+                  matchLabels:
+                    {{- include "microservice.selectorLabels" $ | nindent 20 }}
+            {{- end }}
+        {{- end }}
+      {{- end }}

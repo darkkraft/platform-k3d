@@ -1,0 +1,21 @@
+{{- if .Values.rollout.enabled }}
+# Preview Service for the blue-green Rollout: points at the green (new) version
+# before promotion so it can be health-checked without receiving user traffic.
+# Argo Rollouts injects the rollouts-pod-template-hash into this Service's
+# selector to target the preview ReplicaSet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "microservice.fullname" . }}-preview
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: {{ .Values.service.portName }}
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.portName }}
+      protocol: TCP
+  selector:
+    {{- include "microservice.selectorLabels" . | nindent 4 }}
+{{- end }}

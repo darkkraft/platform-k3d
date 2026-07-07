@@ -1,0 +1,13 @@
+apiVersion: v2
+name: microservice
+description: Generic, production-grade chart for the stateless Rust microservices (api-service, inventory-service).
+type: application
+# Chart version tracks the template contract; appVersion is overridden per-release
+# via values (the image tag), so this stays at a chart-semantics version.
+version: 1.0.0
+appVersion: "1.0.0"
+maintainers:
+  - name: platform-team
+keywords:
+  - microservice
+  - go
