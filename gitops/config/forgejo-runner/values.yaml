@@ -1,0 +1,40 @@
+# Forgejo Actions runner. Registers with the in-cluster Forgejo using the shared
+# secret pre-registered at bootstrap (Secret forgejo-runner-secret), via Forgejo's
+# idempotent offline registration (create-runner-file). Reschedule-safe: it
+# regenerates its .runner file from the secret on every start — no duplicates.
+# Jobs run in ephemeral containers via a Docker-in-Docker sidecar.
+#
+# DinD needs a privileged container — acceptable here because the runner lives in
+# the (non-restricted) forgejo namespace, isolated from the app namespace.
+
+replicaCount: 1
+
+instanceURL: http://forgejo-http.forgejo.svc:3000
+registrationSecretName: forgejo-runner-secret
+
+runner:
+  name: k3d-runner
+  # label -> image used to run "runs-on: docker" jobs. Our pre-baked CI image
+  # (built by the cluster layer, pushed to the k3d registry) carries the pinned
+  # .tool-versions toolchain, so workflows call binaries directly — no runtime
+  # installers. Referenced via the registry's in-network endpoint (:5000), which
+  # is what the DinD daemon can reach (the :5111 host port is host-only).
+  labels:
+    - "docker:docker://k3d-platform-registry:5000/ci-runner:dev"
+
+image:
+  runner: code.forgejo.org/forgejo/runner:6.3.1
+  dind: docker:27-dind
+
+# The k3d registry serves plain HTTP, so the DinD daemon must treat it as an
+# insecure registry to pull the CI job image from it.
+insecureRegistries:
+  - "k3d-platform-registry:5000"
+
+resources:
+  runner:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  dind:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "2", memory: 1Gi }

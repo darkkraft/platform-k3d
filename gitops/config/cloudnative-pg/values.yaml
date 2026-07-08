@@ -1,0 +1,17 @@
+# CloudNativePG operator. It reconciles the Cluster/Database/managed-role CRs in
+# gitops/config/cnpg-cluster (sync-wave 1). Sized small for the sandbox node.
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 100Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+# Per-cluster scraping is enabled on the Cluster CR itself (enablePodMonitor).
+# The operator's own PodMonitor is left off to avoid a hard dependency ordering.
+monitoring:
+  podMonitorEnabled: false

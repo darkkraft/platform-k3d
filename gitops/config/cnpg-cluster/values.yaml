@@ -1,0 +1,53 @@
+# CloudNativePG cluster for the platform.
+# One cluster hosts both application databases; each service gets its own role and
+# owns only its own database (least privilege at DB granularity).
+
+cluster:
+  name: platform-db
+  # HA by default; dev overlay drops this to 1 to fit the sandbox.
+  instances: 2
+  # CNPG-maintained PostgreSQL image (immutable, minor-pinned).
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.2
+  # Anti-affinity so replicas never share a node when more than one exists.
+  enablePodAntiAffinity: true
+
+  storage:
+    size: 2Gi
+    # k3s ships local-path as the default StorageClass.
+    storageClass: local-path
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+  # PodMonitor for Prometheus scraping (kube-prometheus-stack picks it up).
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      # NOTE: `ssl` is a CNPG-managed fixed parameter — it runs TLS by default
+      # (server certs), so it must NOT be set here (the webhook rejects it).
+
+# Databases created declaratively via the CNPG Database CRD. Each is owned by its
+# service role, so a service can only touch its own database.
+databases:
+  - name: orders
+    owner: api_service
+  - name: inventory
+    owner: inventory_service
+
+# Managed roles. Passwords come from ESO-materialised basic-auth secrets — never
+# from plaintext here. CNPG reconciles the role's password from the secret.
+roles:
+  - name: api_service
+    passwordSecret: api-service-db
+    login: true
+  - name: inventory_service
+    passwordSecret: inventory-service-db
+    login: true

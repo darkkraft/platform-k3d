@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cnpg-cluster
+description: CloudNativePG Cluster + declarative Databases and least-privileged roles for the platform.
+type: application
+version: 1.0.0
+appVersion: "16"

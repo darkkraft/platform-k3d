@@ -1,0 +1,43 @@
+# Kyverno admission controller. Policies live in gitops/config/kyverno-policies.
+# Single-replica, modest resources for the sandbox (run 3 admission replicas in prod).
+crds:
+  install: true
+  # Disable the post-upgrade CRD stored-version migration hook. It runs only on
+  # in-place chart upgrades (a no-op on fresh installs — "nothing to do"), but
+  # ArgoCD executes Helm post-upgrade hooks on every sync, leaving a lingering
+  # Completed `kyverno-migrate-resources` Job pod. Our model is clean redeploy per
+  # environment, not in-place upgrade, so this hook adds only noise. Re-enable it
+  # if you start doing in-place Kyverno chart upgrades on a live cluster.
+  migration:
+    enabled: false
+
+# Each controller exposes Prometheus metrics (:8000) + a ServiceMonitor so
+# kube-prometheus-stack scrapes Kyverno (feeds the Kyverno Grafana dashboard).
+admissionController:
+  replicas: 1
+  serviceMonitor:
+    enabled: true
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 384Mi }
+
+backgroundController:
+  serviceMonitor:
+    enabled: true
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 192Mi }
+
+cleanupController:
+  serviceMonitor:
+    enabled: true
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 128Mi }
+
+reportsController:
+  serviceMonitor:
+    enabled: true
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 192Mi }

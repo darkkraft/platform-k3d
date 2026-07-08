@@ -1,0 +1,19 @@
+{{- range .Values.databases }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ .name }}
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+spec:
+  name: {{ .name }}
+  owner: {{ .owner }}
+  cluster:
+    name: {{ $.Values.cluster.name }}
+  # Keep the database if the CR is deleted — never drop application data on a
+  # GitOps prune. Deletion is a deliberate, manual operation.
+  ensure: present
+  databaseReclaimPolicy: retain
+{{- end }}

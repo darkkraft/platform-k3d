@@ -1,0 +1,195 @@
+# kube-prometheus-stack — base values (env overlays tune retention/HA/resources).
+# Tuned for k3s-in-k3d: the control-plane components below are embedded in the
+# k3s server process and have no separate scrape endpoints, so their
+# ServiceMonitors + default rules would fire permanent false "…Down" alerts.
+fullnameOverride: kube-prometheus-stack
+
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }
+kubeEtcd: { enabled: false }
+
+defaultRules:
+  create: true
+  rules:
+    etcd: false
+    kubeScheduler: false
+
+nodeExporter:
+  enabled: true
+kubeStateMetrics:
+  enabled: true
+
+alertmanager:
+  # Host access without a port-forward (sslip.io -> Traefik). No auth: it's
+  # cluster-internal tooling exposed only on the sandbox loadbalancer.
+  # gethomepage.dev/* annotations make the tile auto-appear on the portal
+  # (gitops/config/portal), with a live alert-count widget (no credentials).
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      gethomepage.dev/enabled: "true"
+      gethomepage.dev/name: Alertmanager
+      gethomepage.dev/group: Observability
+      gethomepage.dev/icon: alertmanager.png
+      gethomepage.dev/description: Alert routing & silences
+      # No homepage "alertmanager" widget type exists; alert counts already show
+      # on the Prometheus/Grafana tiles. Tile stays as a plain link.
+    hosts: [alertmanager.127.0.0.1.sslip.io]
+    paths: ["/"]
+    pathType: Prefix
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 25m, memory: 64Mi }
+      limits: { cpu: 100m, memory: 128Mi }
+  # Symptom-based routing. Everything defaults to a null receiver in the sandbox
+  # (no external paging); critical alerts also flow to a "critical" receiver you
+  # wire to Slack/PagerDuty in prod (shown disabled). Watchdog is null-routed;
+  # a critical inhibits the matching warning to cut noise.
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: "null"
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - matchers: ['alertname = "Watchdog"']
+          receiver: "null"
+        - matchers: ['severity = "critical"']
+          receiver: "critical"
+          continue: true
+    receivers:
+      - name: "null"
+      - name: "critical"
+        # Prod: uncomment + point at a Secret-sourced webhook (never inline).
+        # slack_configs:
+        #   - api_url_file: /etc/alertmanager/secrets/alerts-webhook/url
+        #     channel: "#alerts"
+    inhibit_rules:
+      - source_matchers: ['severity = "critical"']
+        target_matchers: ['severity = "warning"']
+        equal: ["alertname", "namespace"]
+
+prometheus:
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      gethomepage.dev/enabled: "true"
+      gethomepage.dev/name: Prometheus
+      gethomepage.dev/group: Observability
+      gethomepage.dev/icon: prometheus.png
+      gethomepage.dev/description: Metrics & alert rules
+      gethomepage.dev/widget.type: prometheus
+      gethomepage.dev/widget.url: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+    hosts: [prometheus.127.0.0.1.sslip.io]
+    paths: ["/"]
+    pathType: Prefix
+  prometheusSpec:
+    retention: 6h
+    retentionSize: 2GB
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    # Discover ServiceMonitor/PodMonitor/Probe/PrometheusRule CRs cluster-wide,
+    # not just those carrying the release's helm label.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    # Sandbox: emptyDir (a pod restart loses recent samples). Prod overlay swaps
+    # in a PVC via storageSpec.volumeClaimTemplate.
+    storageSpec:
+      emptyDir:
+        sizeLimit: 3Gi
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1536Mi }
+
+grafana:
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      gethomepage.dev/enabled: "true"
+      gethomepage.dev/name: Grafana
+      gethomepage.dev/group: Observability
+      gethomepage.dev/icon: grafana.png
+      gethomepage.dev/description: Dashboards (RED, security)
+      # Live-stats widget creds are added per-env (dev/staging overlays) via
+      # HOMEPAGE_VAR_* — prod stays links-only.
+    hosts: [grafana.127.0.0.1.sslip.io]
+  # Admin credentials come from an ESO-materialised Secret (Vault-backed), never
+  # a chart-generated password (which re-randomizes on every sync and drifts).
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  # The chart's ~24 default dashboards are noise. We curate instead: one dashboard
+  # per platform component, imported BY grafana.com ID (not embedded JSON, so the
+  # config stays tiny), organised into two folders. Our own platform dashboards
+  # (service-RED, security) ship as ConfigMaps from monitoring-config. Every
+  # dashboard here is backed by metrics we actually scrape, so none render empty.
+  # Grafana's init container pulls the IDs on start — fine, the monitoring
+  # namespace has no default-deny egress (those policies are scoped to app).
+  defaultDashboardsEnabled: false
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: kubernetes
+          orgId: 1
+          folder: Kubernetes
+          type: file
+          disableDeletion: false
+          editable: true
+          options: { path: /var/lib/grafana/dashboards/kubernetes }
+        - name: security
+          orgId: 1
+          folder: Security
+          type: file
+          disableDeletion: false
+          editable: true
+          options: { path: /var/lib/grafana/dashboards/security }
+  dashboards:
+    # ── Kubernetes folder: cluster + per-component platform dashboards ──
+    kubernetes:
+      node-exporter-full:      { gnetId: 1860,  revision: 45, datasource: Prometheus }
+      kubernetes-views-global: { gnetId: 15757, revision: 43, datasource: Prometheus }
+      kubernetes-views-nodes:  { gnetId: 15759, revision: 40, datasource: Prometheus }
+      kubernetes-views-ns:     { gnetId: 15758, revision: 46, datasource: Prometheus }
+      kubernetes-views-pods:   { gnetId: 15760, revision: 39, datasource: Prometheus }
+      coredns:                 { gnetId: 15762, revision: 22, datasource: Prometheus }
+      alertmanager:            { gnetId: 9578,  revision: 4,  datasource: Prometheus }
+      blackbox-exporter:       { gnetId: 13659, revision: 1,  datasource: Prometheus }
+      external-secrets:        { gnetId: 21640, revision: 4,  datasource: Prometheus }
+      cert-manager:            { gnetId: 11001, revision: 1,  datasource: Prometheus }
+      cloudnative-pg:          { gnetId: 20417, revision: 4,  datasource: Prometheus }
+      loki:                    { gnetId: 14055, revision: 5,  datasource: Prometheus }
+      argocd:                  { gnetId: 14584, revision: 1,  datasource: Prometheus }
+      traefik:                 { gnetId: 4475,  revision: 5,  datasource: Prometheus }
+    # ── Security folder: policy + vulnerability (platform trivy dashboard joins via ConfigMap) ──
+    security:
+      kyverno:                 { gnetId: 15987, revision: 2,  datasource: Prometheus }
+  persistence:
+    enabled: false
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 300m, memory: 256Mi }
+  # Sidecar discovery: our platform dashboards + datasources ship as labeled
+  # ConfigMaps (gitops/config/monitoring-config), discovered without a restart.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+    datasources:
+      enabled: true
+      label: grafana_datasource
+      searchNamespace: ALL

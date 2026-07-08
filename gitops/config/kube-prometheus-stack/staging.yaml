@@ -1,0 +1,24 @@
+# Staging overlay — a bit more retention/headroom; still emptyDir.
+# Portal live widget creds (server-side; see dev overlay note). prod omits this.
+# Backtick-wrapped so the homepage tokens survive the grafana subchart's `tpl`
+# over annotation values (see dev.yaml).
+grafana:
+  ingress:
+    annotations:
+      gethomepage.dev/widget.type: grafana
+      gethomepage.dev/widget.url: http://kube-prometheus-stack-grafana.monitoring.svc
+      gethomepage.dev/widget.username: '{{ `{{HOMEPAGE_VAR_GRAFANA_USER}}` }}'
+      gethomepage.dev/widget.password: '{{ `{{HOMEPAGE_VAR_GRAFANA_PASSWORD}}` }}'
+prometheus:
+  prometheusSpec:
+    retention: 24h
+    retentionSize: 5GB
+    storageSpec:
+      emptyDir:
+        sizeLimit: 6Gi
+    resources:
+      requests: { cpu: 300m, memory: 768Mi }
+      limits: { cpu: "1", memory: 2Gi }
+alertmanager:
+  alertmanagerSpec:
+    replicas: 1

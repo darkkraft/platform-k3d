@@ -1,0 +1,6 @@
+apiVersion: v2
+name: kyverno-policies
+description: Kyverno ClusterPolicies (disallow-latest, require-probes, require-resources, restricted-securityContext) scoped to the app namespace, Audit in dev and Enforce in prod.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

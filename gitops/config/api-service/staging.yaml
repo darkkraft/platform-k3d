@@ -1,0 +1,6 @@
+# api-service — staging overlay. HPA floors at 2 + PDB for HA validation.
+hpa:
+  minReplicas: 2          # HPA owns the count (2→6)
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

@@ -1,0 +1,49 @@
+# App services: accept ingress only from Traefik (ingress) and Prometheus
+# (scrape); egress only to the database (and DNS, from allow-dns).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apps
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+spec:
+  podSelector:
+    {{- toYaml .Values.appSelector | nindent 4 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.ingress }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+        # App-to-app (same namespace) — e.g. the PostSync smoke-test Job, which
+        # carries app labels and curls the service directly.
+        - podSelector:
+            {{- toYaml .Values.appSelector | nindent 12 }}
+      ports:
+        {{- range .Values.appPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+  egress:
+    # To the CloudNativePG database (same namespace).
+    - to:
+        - podSelector:
+            {{- toYaml .Values.dbSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dbPort }}
+    # App-to-app on the app ports (in-cluster smoke test / any service-to-service).
+    - to:
+        - podSelector:
+            {{- toYaml .Values.appSelector | nindent 12 }}
+      ports:
+        {{- range .Values.appPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}

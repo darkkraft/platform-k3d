@@ -1,0 +1,6 @@
+apiVersion: v2
+name: network-policies
+description: Default-deny (ingress+egress) for the app namespace plus least-privilege allows for apps, database, DNS and scraping.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

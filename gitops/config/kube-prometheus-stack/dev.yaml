@@ -1,0 +1,21 @@
+# Dev overlay — single replicas, short retention, emptyDir (base defaults are
+# already dev-sized; this file exists for uniform per-env layering).
+# Portal live widget: HOMEPAGE_VAR_* placeholders resolve inside the portal pod
+# (ESO-injected env), never in the browser. prod omits this on purpose.
+# The kube-prometheus-stack grafana subchart runs `tpl` over its ingress
+# annotation VALUES, so the homepage {{HOMEPAGE_VAR_*}} tokens are backtick-
+# wrapped inside a template action to pass through as literals (not evaluated
+# as Helm templates).
+grafana:
+  ingress:
+    annotations:
+      gethomepage.dev/widget.type: grafana
+      gethomepage.dev/widget.url: http://kube-prometheus-stack-grafana.monitoring.svc
+      gethomepage.dev/widget.username: '{{ `{{HOMEPAGE_VAR_GRAFANA_USER}}` }}'
+      gethomepage.dev/widget.password: '{{ `{{HOMEPAGE_VAR_GRAFANA_PASSWORD}}` }}'
+prometheus:
+  prometheusSpec:
+    retention: 6h
+alertmanager:
+  alertmanagerSpec:
+    replicas: 1

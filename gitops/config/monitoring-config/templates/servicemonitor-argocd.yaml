@@ -1,0 +1,24 @@
+# ArgoCD exposes Prometheus metrics on per-component Services (created by the
+# argo-cd chart via the TF module's metrics.enabled). ArgoCD is installed by
+# Terraform, not a Helm chart ArgoCD manages, and its metrics Services appear
+# only AFTER the prometheus-operator CRDs exist — so the ServiceMonitor lives
+# here (monitoring-config, a late sync-wave) rather than in the install, which
+# would need the CRD at apply time. All four metrics Services share
+# app.kubernetes.io/part-of=argocd and a port named http-metrics; non-metrics
+# Services lack that port, so this one selector scrapes exactly the right set.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "monitoring-config.labels" . | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames: ["argocd"]
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: argocd
+  endpoints:
+    - port: http-metrics
+      interval: 30s

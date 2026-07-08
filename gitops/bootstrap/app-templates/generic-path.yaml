@@ -1,0 +1,56 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .name }}
+  namespace: {{ .argocdNamespace }}
+  labels:
+    app.kubernetes.io/part-of: platform
+    platform.example.com/component: {{ .name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .wave | default 0 | quote }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: {{ .project | default "platform" }}
+  destination:
+    server: {{ .cluster.server }}
+    namespace: {{ .namespace }}
+  sources:
+    # In-repo chart/manifests at .path, layered with in-repo env overlays via a
+    # sibling $values ref source (both from the GitOps repo).
+    - repoURL: {{ .git.repoURL }}
+      targetRevision: {{ .git.targetRevision }}
+      path: {{ .path }}
+      helm:
+        releaseName: {{ .releaseName | default .name }}
+        {{- with .valueFiles }}
+        valueFiles:
+          {{- range . }}
+          - $values/{{ . }}
+          {{- end }}
+        {{- end }}
+    {{- if .valueFiles }}
+    - repoURL: {{ .git.repoURL }}
+      targetRevision: {{ .git.targetRevision }}
+      ref: values
+    {{- end }}
+  syncPolicy:
+    automated:
+      prune: {{ dig "prune" true . }}
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      {{- range .extraSyncOptions }}
+      - {{ . }}
+      {{- end }}
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  {{- with .ignoreDifferences }}
+  ignoreDifferences:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}

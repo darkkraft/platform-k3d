@@ -1,0 +1,44 @@
+{{- if .Values.vault.enabled }}
+# Default-deny ingress for the Vault namespace: no pod may reach Vault unless a
+# rule below allows it. (Egress intentionally not denied — dev Vault is
+# in-memory and self-contained; lock egress too when moving to a real Vault.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-default-deny-ingress
+  namespace: {{ .Values.vault.namespace }}
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow the Vault API/cluster ports only from the explicitly listed namespaces
+# (External Secrets Operator + the Traefik ingress). Everything else stays denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-allow-known-clients
+  namespace: {{ .Values.vault.namespace }}
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- range .Values.vault.allowFromNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        {{- range .Values.vault.ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- end }}

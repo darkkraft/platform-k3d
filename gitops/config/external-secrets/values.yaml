@@ -1,0 +1,44 @@
+# External Secrets Operator.
+# Bridges Vault (source of truth) -> native k8s Secrets consumed by apps and CNPG.
+# CRDs are installed with the chart so the ClusterSecretStore/ExternalSecret in
+# gitops/config/secret-store (sync-wave 1) have their types available.
+
+installCRDs: true
+replicaCount: 1
+
+# Emit controller logs as JSON to match the rest of the platform.
+extraArgs:
+  loglevel: info
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 192Mi
+
+webhook:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+certController:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# ServiceMonitor is enabled once kube-prometheus-stack is up (wave 3). The CRD
+# ships in wave 0 (prometheus-operator-crds) so this is safe to leave on.
+serviceMonitor:
+  enabled: true

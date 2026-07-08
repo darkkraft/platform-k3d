@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: portal-config
+  labels:
+    {{- include "portal.labels" . | nindent 4 }}
+data:
+  # Discovery mode: tiles come from annotated Ingresses cluster-wide.
+  kubernetes.yaml: |
+    mode: cluster
+
+  # No hardcoded tiles — everything is ingress-discovered.
+  services.yaml: ""
+
+  bookmarks.yaml: ""
+
+  settings.yaml: |
+    title: platform platform — {{ .Values.environment }}
+    theme: dark
+    color: slate
+    headerStyle: clean
+    statusStyle: dot
+    hideVersion: true
+    layout:
+      Platform:
+        style: row
+        columns: 3
+      Observability:
+        style: row
+        columns: 3
+      Apps:
+        style: row
+        columns: 2
+
+  widgets.yaml: |
+    - kubernetes:
+        cluster:
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
+          label: {{ .Values.environment }}
+        nodes:
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
+    - datetime:
+        text_size: xl
+        format:
+          timeStyle: short
+          dateStyle: long

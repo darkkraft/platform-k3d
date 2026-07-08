@@ -1,0 +1,59 @@
+# CloudNativePG pods: accept SQL from the apps, metrics scrape from Prometheus,
+# management from the CNPG operator, and replication from sibling instances.
+# Egress to siblings, the operator, and the Kubernetes API (instance manager).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+spec:
+  podSelector:
+    {{- toYaml .Values.dbSelector | nindent 4 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # SQL from the app services.
+    - from:
+        - podSelector:
+            {{- toYaml .Values.appSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dbPort }}
+    # Streaming replication between instances (same cluster, same namespace).
+    - from:
+        - podSelector:
+            {{- toYaml .Values.dbSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dbPort }}
+    # Metrics scrape (PodMonitor) from Prometheus.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dbMetricsPort }}
+    # Management from the CNPG operator (instance manager API / webhooks).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.dbOperator }}
+  egress:
+    # Replication to sibling instances + reach the operator.
+    - to:
+        - podSelector:
+            {{- toYaml .Values.dbSelector | nindent 12 }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.dbOperator }}
+    # Kubernetes API (the instance manager talks to the API server).
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443

@@ -1,0 +1,45 @@
+# api-service (order API) — base values for the generic microservice chart.
+# Env overlays (dev/staging/prod) tune replicas/resources.
+
+nameOverride: api-service
+
+image:
+  # Local sandbox pulls from the k3d registry (real tag, never :latest). CI/prod
+  # overrides repository->registry (GHCR) and tag->git SHA via image-bump PRs.
+  repository: k3d-platform-registry:5111/api-service
+  tag: dev
+  pullPolicy: IfNotPresent
+
+containerPort: 8080
+service:
+  port: 8080
+
+ingress:
+  enabled: true
+  host: api.127.0.0.1.sslip.io
+  annotations:
+    cert-manager.io/cluster-issuer: local-ca
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: api-service
+    gethomepage.dev/group: Apps
+    gethomepage.dev/icon: rust.png
+    gethomepage.dev/description: Orders API (/orders, /healthz)
+    gethomepage.dev/pod-selector: app.kubernetes.io/name=api-service
+  tls:
+    - hosts: [api.127.0.0.1.sslip.io]
+      secretName: api-service-tls
+
+# Non-secret config. Credentials arrive via envFrom (ESO-materialised secret).
+env:
+  PORT: "8080"
+  DB_HOST: platform-db-rw # CNPG read-write service
+  DB_PORT: "5432"
+  DB_NAME: orders
+  DB_SSLMODE: require
+
+envFrom:
+  - secretRef:
+      name: api-service-db
+
+smokeTest:
+  enabled: true

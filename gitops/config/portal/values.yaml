@@ -1,0 +1,42 @@
+# Portal — gethomepage.dev, the one page that links every platform service.
+#
+# Tiles are NOT hardcoded: homepage watches the cluster's Ingresses and renders
+# a tile for every ingress annotated gethomepage.dev/enabled=true (name, group,
+# icon come from annotations). Add a new service with an annotated ingress and
+# it appears on the portal by itself — nothing to edit here.
+#
+# Live widgets (Prometheus targets, Grafana stats) authenticate SERVER-SIDE:
+# credentials arrive as HOMEPAGE_VAR_* env vars from an ESO-materialised Secret
+# (Vault-backed) and are never rendered to the browser. Enabled per environment
+# (dev/staging yes, prod links-only).
+
+image:
+  repository: ghcr.io/gethomepage/homepage
+  tag: v1.13.2
+  pullPolicy: IfNotPresent
+
+environment: dev # overlays override; shown in the page title
+
+ingress:
+  host: home.127.0.0.1.sslip.io
+
+# Homepage validates the exact Host:port header. The k3d loadbalancer's host
+# port is dynamic (lazy.sh picks the first free port at/above 80/8080/9080), so
+# a fixed allow-list would reject the browser whenever the base port is taken.
+# This portal is localhost-only, fronted by Traefik, with read-only RBAC — the
+# host-header check (a DNS-rebinding / host-spoof guard) adds nothing here, so
+# it is disabled. In a real multi-tenant deployment, pin this to the FQDN.
+allowedHosts: "*"
+
+# Grafana live-widget credentials, materialised by ESO from Vault
+# (monitoring/grafana — same scoped read policy the monitoring stack uses).
+# prod keeps this off: no credentials in the prod portal pod.
+grafanaWidget:
+  enabled: false
+  vaultKey: monitoring/grafana
+  secretName: portal-grafana-widget
+  clusterSecretStore: vault-backend
+
+resources:
+  requests: { cpu: 25m, memory: 96Mi }
+  limits: { cpu: 200m, memory: 256Mi }

@@ -1,0 +1,35 @@
+# Secret-store: wires External Secrets Operator to Vault and declares one
+# ExternalSecret per service.
+#
+# The resulting k8s Secret is consumed TWO ways from a single object:
+#   1. CloudNativePG managed role  -> needs type kubernetes.io/basic-auth with
+#      keys `username` + `password`.
+#   2. The app container `envFrom`  -> needs `DB_USER` + `DB_PASSWORD` env vars.
+# So each ExternalSecret templates a basic-auth Secret carrying BOTH key pairs.
+
+clusterSecretStore:
+  name: vault-backend
+
+vault:
+  # In-cluster Vault (see gitops/config/vault). Plain http in the sandbox.
+  server: http://vault.vault.svc:8200
+  # KV-v2 mount created by the TF services layer (module vault-config).
+  path: platform
+  version: v2
+  # Scoped, read-only token written by TF as a k8s Secret in the ESO namespace.
+  tokenSecretRef:
+    name: vault-token
+    namespace: external-secrets
+    key: token
+
+refreshInterval: 1h
+
+# One entry per service. secretName MUST match the CNPG managed-role
+# passwordSecret and the microservice chart's envFrom secretRef.
+services:
+  - name: api-service
+    vaultKey: db/api-service
+    secretName: api-service-db
+  - name: inventory-service
+    vaultKey: db/inventory-service
+    secretName: inventory-service-db

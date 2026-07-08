@@ -1,0 +1,6 @@
+# Portal — prod overlay: links-only. No credentials of any kind enter the prod
+# portal pod (no Grafana widget creds), matching the "no passwords surfaced in
+# prod" access policy.
+environment: prod
+grafanaWidget:
+  enabled: false

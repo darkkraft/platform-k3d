@@ -1,0 +1,6 @@
+# Local CA chain: selfSigned issuer -> CA cert -> CA ClusterIssuer.
+# App ingresses reference clusterIssuerName to get TLS certs for their hosts.
+# (Browsers won't trust the CA — curl -k locally; in prod swap for ACME/Let's Encrypt.)
+caNamespace: cert-manager
+caSecretName: local-ca-tls
+clusterIssuerName: local-ca

@@ -1,0 +1,22 @@
+# Blackbox exporter — synthetic HTTP probes. Targets are declared as Probe CRs
+# in gitops/config/monitoring-config (discovered by Prometheus), not here.
+# Fixed name so Probe CRs can reference the service as blackbox-exporter:9115.
+fullnameOverride: blackbox-exporter
+
+resources:
+  requests: { cpu: 25m, memory: 32Mi }
+  limits: { cpu: 100m, memory: 64Mi }
+
+serviceMonitor:
+  enabled: false
+
+config:
+  modules:
+    http_2xx:
+      prober: http
+      timeout: 5s
+      http:
+        valid_status_codes: [200]
+        method: GET
+        preferred_ip_protocol: ip4
+        follow_redirects: true

@@ -1,0 +1,4 @@
+# Portal — dev overlay: live Grafana widget with server-side creds.
+environment: dev
+grafanaWidget:
+  enabled: true

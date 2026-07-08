@@ -1,0 +1,2 @@
+# Prod: enforce — reject non-compliant workloads at admission.
+failureAction: Enforce

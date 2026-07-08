@@ -1,0 +1,34 @@
+# RED dashboard shipped as a sidecar-discovered ConfigMap. The JSON lives in a
+# raw file (dashboards/) loaded via Files.Get so Grafana's own double-brace
+# legend syntax is not interpreted by Helm.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-service-red
+  namespace: {{ .Values.namespace }}
+  labels:
+    grafana_dashboard: "1"
+    {{- include "monitoring-config.labels" . | nindent 4 }}
+  annotations:
+    grafana_folder: "platform"
+data:
+  service-red.json: |-
+    {{- .Files.Get "dashboards/service-red.json" | nindent 4 }}
+---
+# Security / image-vulnerability dashboard fed by trivy-operator metrics
+# (trivy_image_vulnerabilities / trivy_image_exposedsecrets). Same sidecar-
+# discovered ConfigMap pattern. This is the in-cluster "results home" for the
+# runtime vulnerability scans (the CI pipeline gates + emits JSON per run).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-security-vulns
+  namespace: {{ .Values.namespace }}
+  labels:
+    grafana_dashboard: "1"
+    {{- include "monitoring-config.labels" . | nindent 4 }}
+  annotations:
+    grafana_folder: "Security"
+data:
+  security-vulns.json: |-
+    {{- .Files.Get "dashboards/security-vulns.json" | nindent 4 }}

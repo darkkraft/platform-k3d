@@ -1,0 +1,25 @@
+{{- range .Values.apps }}
+---
+# Synthetic HTTP probe (blackbox) for {{ .name }}, via its Traefik ingress host.
+# Prometheus discovers this Probe CR (probeSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    release: {{ $.Values.prometheusReleaseLabel }}
+    {{- include "monitoring-config.labels" $ | nindent 4 }}
+spec:
+  jobName: blackbox-http
+  interval: 30s
+  module: {{ $.Values.blackbox.module }}
+  prober:
+    url: {{ $.Values.blackbox.proberURL }}
+  targets:
+    staticConfig:
+      static:
+        - {{ .probeURL | quote }}
+      labels:
+        service: {{ .name }}
+{{- end }}

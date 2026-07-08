@@ -1,0 +1,15 @@
+# Kyverno policy set. Defense-in-depth ON TOP of Pod Security Admission
+# (restricted) — PSA covers the pod-security baseline; these add supply-chain and
+# operability guardrails (no :latest, probes + resources required).
+#
+# failureAction: Audit in dev (observe, don't block), Enforce in staging/prod.
+failureAction: Audit
+
+# Only govern the application namespace; system/operator namespaces run upstream
+# charts we don't control.
+matchNamespaces:
+  - app
+
+# Namespaces never subject to these policies (belt-and-suspenders with match).
+excludeNamespaces:
+  - kube-system

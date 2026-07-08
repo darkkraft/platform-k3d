@@ -1,0 +1,184 @@
+{{- /* Shared match/exclude for every policy: govern Pods (Kyverno auto-generates
+       the Deployment/rollout equivalents) in the app namespace only. */ -}}
+{{- define "kp.match" -}}
+any:
+  - resources:
+      kinds:
+        - Pod
+      namespaces:
+        {{- range $.Values.matchNamespaces }}
+        - {{ . }}
+        {{- end }}
+{{- end -}}
+{{- define "kp.exclude" -}}
+any:
+  - resources:
+      namespaces:
+        {{- range $.Values.excludeNamespaces }}
+        - {{ . }}
+        {{- end }}
+  # Operator-managed workloads we don't author (e.g. CloudNativePG's initdb
+  # bootstrap Job and instance pods) carry these labels but cannot satisfy the
+  # app-oriented probe/resource rules. Exclude them so Enforce mode doesn't block
+  # the database from bootstrapping. Our own app workloads are unaffected.
+  - resources:
+      selector:
+        matchExpressions:
+          - key: cnpg.io/cluster
+            operator: Exists
+{{- end -}}
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    policies.kyverno.io/category: Supply Chain
+spec:
+  validationFailureAction: {{ .Values.failureAction }}
+  background: true
+  rules:
+    - name: require-image-tag
+      match:
+        {{- include "kp.match" . | nindent 8 }}
+      exclude:
+        {{- include "kp.exclude" . | nindent 8 }}
+      validate:
+        message: "An explicit image tag is required (a digest is better)."
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+    - name: disallow-latest-tag
+      match:
+        {{- include "kp.match" . | nindent 8 }}
+      exclude:
+        {{- include "kp.exclude" . | nindent 8 }}
+      validate:
+        message: "Using a mutable ':latest' tag is not allowed."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
+            # Conditional anchor: also enforced on init/ephemeral containers when present.
+            "=(initContainers)":
+              - image: "!*:latest"
+            "=(ephemeralContainers)":
+              - image: "!*:latest"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-probes
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    policies.kyverno.io/category: Reliability
+spec:
+  validationFailureAction: {{ .Values.failureAction }}
+  background: true
+  rules:
+    - name: require-liveness-readiness
+      match:
+        {{- include "kp.match" . | nindent 8 }}
+      exclude:
+        {{- include "kp.exclude" . | nindent 8 }}
+          # Run-to-completion Job pods (our ArgoCD PostSync smoke tests, and any
+          # other Jobs) have no long-lived process to probe — liveness/readiness
+          # are meaningless for them. The Job controller stamps this label on the
+          # pods it creates, so we exclude only Job-owned pods from this one rule.
+          # Jobs remain subject to every other policy (hardening, resources, tags).
+          - resources:
+              selector:
+                matchExpressions:
+                  - key: batch.kubernetes.io/job-name
+                    operator: Exists
+      validate:
+        message: "Every container must define livenessProbe and readinessProbe."
+        pattern:
+          spec:
+            containers:
+              - livenessProbe:
+                  "<(exists)": true
+                readinessProbe:
+                  "<(exists)": true
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resources
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    policies.kyverno.io/category: Reliability
+spec:
+  validationFailureAction: {{ .Values.failureAction }}
+  background: true
+  rules:
+    - name: require-requests-limits
+      match:
+        {{- include "kp.match" . | nindent 8 }}
+      exclude:
+        {{- include "kp.exclude" . | nindent 8 }}
+      validate:
+        message: "CPU/memory requests and limits are required on every container."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restricted-security-context
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    policies.kyverno.io/category: Pod Security
+spec:
+  validationFailureAction: {{ .Values.failureAction }}
+  background: true
+  rules:
+    - name: require-hardened-securitycontext
+      match:
+        {{- include "kp.match" . | nindent 8 }}
+      exclude:
+        {{- include "kp.exclude" . | nindent 8 }}
+      validate:
+        message: "Containers must run non-root, read-only rootfs, no privilege escalation, drop ALL caps."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  runAsNonRoot: true
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop:
+                      - ALL
+            # Same hardening on init/ephemeral containers when present (they
+            # otherwise bypass the policy entirely).
+            "=(initContainers)":
+              - securityContext:
+                  runAsNonRoot: true
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop:
+                      - ALL
+            "=(ephemeralContainers)":
+              - securityContext:
+                  runAsNonRoot: true
+                  allowPrivilegeEscalation: false

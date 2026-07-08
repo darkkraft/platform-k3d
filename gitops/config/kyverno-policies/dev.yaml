@@ -1,0 +1,2 @@
+# Dev: observe violations without blocking deploys.
+failureAction: Audit

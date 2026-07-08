@@ -1,0 +1,24 @@
+# Turn on Traefik's Prometheus metrics. Traefik is k3s's bundled ingress, managed
+# by the k3s helm-controller, so we override its chart values with a
+# HelmChartConfig (k3s merges this onto the packaged traefik chart and re-runs
+# the install job). This enables a dedicated metrics Service + a ServiceMonitor
+# (the `metrics` entrypoint on :9100 is already a chart default). Our Prometheus
+# discovers the ServiceMonitor cluster-wide, feeding the Traefik dashboard.
+#
+# NOTE: applying/removing this makes k3s redeploy Traefik → a brief (~10-30s)
+# ingress blip on the *.sslip.io hosts. Expected, one-off.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+  labels:
+    {{- include "monitoring-config.labels" . | nindent 4 }}
+spec:
+  valuesContent: |-
+    metrics:
+      prometheus:
+        service:
+          enabled: true
+        serviceMonitor:
+          enabled: true

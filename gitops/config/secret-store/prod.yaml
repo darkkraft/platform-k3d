@@ -1,0 +1,3 @@
+# Prod overrides for secret-store. Tighter refresh so a rotated Vault value
+# propagates to the cluster quickly.
+refreshInterval: 15m

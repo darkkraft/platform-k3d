@@ -1,0 +1,40 @@
+# NetworkPolicies for the application namespace (app). Zero-trust:
+# everything is denied, then the minimum required flows are re-opened.
+#
+# Namespace selectors use the automatic `kubernetes.io/metadata.name` label
+# (present on every namespace since k8s 1.21).
+
+# App workloads (the two Rust services).
+appSelector:
+  matchExpressions:
+    - key: app.kubernetes.io/name
+      operator: In
+      values: ["api-service", "inventory-service"]
+appPorts: [8080, 8081]
+
+# CloudNativePG cluster pods (same namespace as the apps).
+dbSelector:
+  matchLabels:
+    cnpg.io/cluster: platform-db
+dbPort: 5432
+dbMetricsPort: 9187
+
+# Where the collaborators live.
+namespaces:
+  dns: kube-system # CoreDNS
+  ingress: kube-system # Traefik (klipper) ingress
+  monitoring: monitoring # Prometheus scrape + blackbox
+  dbOperator: cnpg-system # CNPG operator -> instance management
+
+# Vault namespace lockdown. Vault holds every credential, so it must not be
+# reachable by arbitrary pods. Default-deny ingress in the vault namespace, then
+# allow ONLY: External Secrets Operator (reads KV) and Traefik (serves the UI
+# ingress AND the ingress the services layer uses to configure Vault). Egress is
+# left open (dev Vault is self-contained).
+vault:
+  enabled: true
+  namespace: vault
+  ports: [8200, 8201] # API + cluster
+  allowFromNamespaces:
+    - external-secrets # ESO ClusterSecretStore reads platform/db/*, monitoring/*
+    - kube-system # Traefik serves the vault.*.sslip.io ingress

@@ -1,0 +1,99 @@
+{{- $names := list }}
+{{- range .Values.apps }}{{ $names = append $names .name }}{{ end }}
+{{- $jobs := join "|" $names }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-rules
+  namespace: {{ .Values.namespace }}
+  labels:
+    release: {{ .Values.prometheusReleaseLabel }}
+    {{- include "monitoring-config.labels" . | nindent 4 }}
+spec:
+  groups:
+    # RED (Rate / Errors / Duration) for the application services. Metrics are
+    # emitted by the Rust apps (http_requests_total, http_request_duration_seconds).
+    - name: apps.red
+      interval: 30s
+      rules:
+        - alert: ServiceDown
+          expr: up{job=~"{{ $jobs }}"} == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "Service {{ `{{ $labels.job }}` }} is down"
+            description: "Prometheus target {{ `{{ $labels.job }}` }} in {{ `{{ $labels.namespace }}` }} has been unreachable for 2m."
+
+        - alert: HighErrorRate
+          expr: |
+            sum by (job) (rate(http_requests_total{job=~"{{ $jobs }}",code=~"5.."}[5m]))
+            / sum by (job) (rate(http_requests_total{job=~"{{ $jobs }}"}[5m]))
+            > {{ .Values.thresholds.errorRatio }}
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ `{{ $labels.job }}` }} 5xx ratio {{ `{{ $value | humanizePercentage }}` }}"
+            description: "5xx error ratio above {{ .Values.thresholds.errorRatio }} for 5m."
+
+        - alert: HighLatencyP95
+          expr: |
+            histogram_quantile(0.95,
+              sum by (job, le) (rate(http_request_duration_seconds_bucket{job=~"{{ $jobs }}"}[5m]))
+            ) > {{ .Values.thresholds.latencyP95Seconds }}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ `{{ $labels.job }}` }} p95 latency {{ `{{ $value | printf \"%.3f\" }}` }}s"
+            description: "p95 request latency above {{ .Values.thresholds.latencyP95Seconds }}s for 10m."
+
+        - alert: BlackboxProbeFailed
+          expr: probe_success == 0
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "Synthetic probe failing: {{ `{{ $labels.instance }}` }}"
+            description: "Blackbox HTTP probe to {{ `{{ $labels.instance }}` }} has failed for 5m."
+
+    # Database (CloudNativePG exporter — enablePodMonitor on the Cluster).
+    - name: platform.db
+      interval: 30s
+      rules:
+        - alert: PostgresDown
+          expr: cnpg_collector_up == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "CNPG instance {{ `{{ $labels.pod }}` }} unreachable"
+            description: "cnpg_collector_up=0 for 2m — postgres crashed or the exporter is broken."
+
+        - alert: PostgresConnectionsSaturation
+          expr: |
+            sum by (cluster) (cnpg_backends_total)
+            / on (cluster) group_left()
+            max by (cluster) (cnpg_pg_settings_setting{name="max_connections"}) > 0.85
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "CNPG {{ `{{ $labels.cluster }}` }} at {{ `{{ $value | humanizePercentage }}` }} of max_connections"
+
+        - alert: PostgresPVCFillingUp
+          # NOTE: kubelet_volume_stats reports the *backing filesystem*. For the k3d
+          # `local-path` provisioner the PVC is a hostPath bind-mount, so these
+          # stats reflect the whole host disk, not the 1Gi PVC — which would fire
+          # this alert on the developer's laptop disk, not on Postgres. We therefore
+          # scope the alert to real (CSI / non-local-path) storage classes via a
+          # join on kube_persistentvolumeclaim_info. Correct in prod, silent in the
+          # k3d sandbox. (Drop the `and` clause if you run CNPG on local-path for real.)
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes{persistentvolumeclaim=~"platform-db-.*"}
+              / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"platform-db-.*"}
+              > 0.80
+            )
+            and on (namespace, persistentvolumeclaim)
+              kube_persistentvolumeclaim_info{storageclass!="local-path"}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Postgres PVC {{ `{{ $labels.persistentvolumeclaim }}` }} at {{ `{{ $value | humanizePercentage }}` }}"
+            description: "At 100% the primary refuses to start. Expand the volume or investigate WAL retention."

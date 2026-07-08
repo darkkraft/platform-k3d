@@ -1,0 +1,3 @@
+# Dev overrides for secret-store. Defaults (values.yaml) are already dev-sized;
+# this file exists so the per-env valueFiles layering is uniform across envs.
+refreshInterval: 1h

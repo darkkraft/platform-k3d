@@ -1,0 +1,13 @@
+# CNPG cluster — dev overlay. Single instance, minimal storage/resources to fit
+# the sandbox VM. No HA here; failover/HA is exercised in staging/prod.
+cluster:
+  instances: 1
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

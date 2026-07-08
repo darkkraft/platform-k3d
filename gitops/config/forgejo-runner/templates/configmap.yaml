@@ -1,0 +1,28 @@
+# Daemon config: log level + the label->image mapping for jobs. The Docker
+# backend is reached via the DOCKER_HOST env (the DinD sidecar).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: forgejo-runner-config
+  labels:
+    {{- include "forgejo-runner.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    log:
+      level: info
+    runner:
+      capacity: 1
+      timeout: 30m
+      labels:
+        {{- range .Values.runner.labels }}
+        - {{ . | quote }}
+        {{- end }}
+    container:
+      # "automount": act_runner finds the runner's docker host (the shared unix
+      # socket at /run/docker.sock, from DOCKER_HOST) and MOUNTS it into every job
+      # container — so `docker build`/push in a workflow step reaches the DinD
+      # daemon. This was the missing piece: previously jobs got no docker host and
+      # hit an empty /var/run/docker.sock.
+      docker_host: "automount"
+      network: ""
+      privileged: false

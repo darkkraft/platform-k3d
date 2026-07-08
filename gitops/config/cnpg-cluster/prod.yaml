@@ -1,0 +1,16 @@
+# CNPG cluster — prod overlay. Three instances (primary + 2 replicas) for quorum
+# on failover, larger PVCs and headroom.
+cluster:
+  instances: 3
+  storage:
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  postgresql:
+    parameters:
+      max_connections: "200"

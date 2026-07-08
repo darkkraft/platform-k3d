@@ -1,0 +1,2 @@
+# Staging: enforce, so prod-blocking violations surface before prod.
+failureAction: Enforce

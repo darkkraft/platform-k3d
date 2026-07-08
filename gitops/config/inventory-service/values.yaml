@@ -1,0 +1,42 @@
+# inventory-service (product/inventory API) — base values for the microservice chart.
+
+nameOverride: inventory-service
+
+image:
+  # Local sandbox pulls from the k3d registry (real tag, never :latest).
+  repository: k3d-platform-registry:5111/inventory-service
+  tag: dev
+  pullPolicy: IfNotPresent
+
+containerPort: 8081
+service:
+  port: 8081
+
+ingress:
+  enabled: true
+  host: inventory.127.0.0.1.sslip.io
+  annotations:
+    cert-manager.io/cluster-issuer: local-ca
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: inventory-service
+    gethomepage.dev/group: Apps
+    gethomepage.dev/icon: rust.png
+    gethomepage.dev/description: Inventory API (/products, /healthz)
+    gethomepage.dev/pod-selector: app.kubernetes.io/name=inventory-service
+  tls:
+    - hosts: [inventory.127.0.0.1.sslip.io]
+      secretName: inventory-service-tls
+
+env:
+  PORT: "8081"
+  DB_HOST: platform-db-rw # CNPG read-write service
+  DB_PORT: "5432"
+  DB_NAME: inventory
+  DB_SSLMODE: require
+
+envFrom:
+  - secretRef:
+      name: inventory-service-db
+
+smokeTest:
+  enabled: true

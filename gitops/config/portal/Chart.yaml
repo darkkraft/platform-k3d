@@ -1,0 +1,6 @@
+apiVersion: v2
+name: portal
+description: Central platform dashboard (gethomepage) — auto-discovers every annotated Ingress in the cluster
+type: application
+version: 0.1.0
+appVersion: v1.13.2

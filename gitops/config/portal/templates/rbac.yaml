@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portal
+  labels:
+    {{- include "portal.labels" . | nindent 4 }}
+---
+# Read-only discovery: homepage lists Ingresses (tile auto-discovery) and reads
+# nodes/pods/metrics for the cluster-stats widget. Nothing writable.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: portal-discovery
+  labels:
+    {{- include "portal.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: portal-discovery
+  labels:
+    {{- include "portal.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: portal-discovery
+subjects:
+  - kind: ServiceAccount
+    name: portal
+    namespace: {{ .Release.Namespace }}

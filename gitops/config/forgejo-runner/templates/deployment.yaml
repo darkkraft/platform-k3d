@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forgejo-runner
+  labels:
+    {{- include "forgejo-runner.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: forgejo-runner
+  template:
+    metadata:
+      labels:
+        {{- include "forgejo-runner.labels" . | nindent 8 }}
+      annotations:
+        # Roll the runner (reload config.yaml + reset the DinD image cache) when
+        # the daemon config changes — the daemon reads config only at startup.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+        # forgejo-runner (raw binary). Idempotent offline registration: regenerate
+        # the .runner file from the shared secret (the server already has this
+        # runner registered with the same secret -> no duplicates on reschedule),
+        # then run the daemon. Jobs execute in the DinD sidecar.
+        - name: runner
+          image: {{ .Values.image.runner }}
+          # Root so it can use the DinD socket (root:docker, 0660) shared at /run.
+          # Acceptable: the runner is in the isolated forgejo namespace and DinD is
+          # already privileged; job containers also run as root, so the automounted
+          # socket is usable inside them too.
+          securityContext:
+            runAsUser: 0
+            # rootfs is immutable; the runner writes only to mounted volumes
+            # (/data, /run, /tmp) — HOME is redirected to /data below.
+            readOnlyRootFilesystem: true
+          workingDir: /data
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              forgejo-runner create-runner-file \
+                --instance "$GITEA_INSTANCE_URL" \
+                --name "$GITEA_RUNNER_NAME" \
+                --secret "$RUNNER_SECRET"
+              exec forgejo-runner daemon --config /config/config.yaml
+          env:
+            # readOnlyRootFilesystem is on — point HOME (and any XDG cache the
+            # runner writes) at the writable /data volume instead of the rootfs.
+            - name: HOME
+              value: /data
+            # Talk to DinD over its UNIX SOCKET (shared via the docker-sock volume
+            # at /run — alpine symlinks /var/run→/run). act_runner's
+            # `docker_host: automount` then mounts THIS socket into every job
+            # container, so `docker build` in a workflow reaches the daemon. (The
+            # TLS-over-tcp endpoint couldn't be auto-mounted into job containers.)
+            - name: DOCKER_HOST
+              value: unix:///run/docker.sock
+            - name: GITEA_INSTANCE_URL
+              value: {{ .Values.instanceURL | quote }}
+            - name: GITEA_RUNNER_NAME
+              value: {{ .Values.runner.name | quote }}
+            - name: RUNNER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.registrationSecretName }}
+                  key: secret
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /run
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.resources.runner | nindent 12 }}
+        # Docker-in-Docker: provides the container runtime jobs need. Privileged
+        # (isolated in the forgejo namespace, not the restricted app namespace).
+        - name: dind
+          image: {{ .Values.image.dind }}
+          securityContext:
+            privileged: true
+          {{- with .Values.insecureRegistries }}
+          # --insecure-registry lets DinD pull the CI job image from the
+          # plain-HTTP k3d registry.
+          args:
+            {{- range . }}
+            - "--insecure-registry={{ . }}"
+            {{- end }}
+          {{- end }}
+          env:
+            # No TLS — the transport is the shared unix socket at /run/docker.sock
+            # (in-pod, private). dockerd creates it there via the /run mount.
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /run
+            - name: dind-storage
+              mountPath: /var/lib/docker
+          resources:
+            {{- toYaml .Values.resources.dind | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: docker-sock
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+        - name: dind-storage
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: forgejo-runner-config

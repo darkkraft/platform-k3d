@@ -1,0 +1,66 @@
+# HashiCorp Vault — SANDBOX (dev mode).
+#
+# Dev mode runs a single, in-memory, auto-unsealed Vault with a known root token.
+# This is deliberately NOT production-grade; the production shape (Raft HA on a
+# PVC, KMS auto-unseal, Kubernetes auth instead of a static token) is the
+# hardening path. The ESO->Vault secret contract is identical either way,
+# so nothing downstream changes when Vault is hardened.
+
+global:
+  tlsDisable: true # TLS terminates at the mesh/ingress in prod; dev is plain http.
+
+# We use External Secrets Operator, not the Vault Agent injector.
+injector:
+  enabled: false
+
+server:
+  dev:
+    enabled: true
+    devRootToken: "root" # sandbox only; TF services layer authenticates with this.
+
+  # Dev mode is in-memory and single-node: no persistence, no HA, no standalone.
+  dataStorage:
+    enabled: false
+  standalone:
+    enabled: false
+  ha:
+    enabled: false
+
+  logLevel: info
+  logFormat: json
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  readinessProbe:
+    enabled: true
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+
+  # Host access to the UI/API without a port-forward (sslip.io -> Traefik).
+  # Sandbox-only convenience: login still requires the token, and in prod
+  # (real Vault, TLS, k8s auth) this ingress is dropped.
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      gethomepage.dev/enabled: "true"
+      gethomepage.dev/name: Vault
+      gethomepage.dev/group: Platform
+      gethomepage.dev/icon: vault.png
+      gethomepage.dev/description: Secrets (dev mode)
+    hosts:
+      - host: vault.127.0.0.1.sslip.io
+        paths: []
+
+# The UI is handy in the sandbox; it stays ClusterIP with the ingress above as
+# the single exposure point.
+ui:
+  enabled: true
+  serviceType: ClusterIP

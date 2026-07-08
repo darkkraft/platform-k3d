@@ -1,0 +1,61 @@
+# Loki — single-binary mode, filesystem storage. Right-sized for the sandbox;
+# for prod swap object_store to S3/GCS and scale to the read/write/backend split.
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  limits_config:
+    retention_period: 168h # 7 days
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+  # Retention only DELETES data if the compactor runs with retention enabled —
+  # otherwise retention_period is inert and the PVC fills. Single-binary runs the
+  # compactor in-process; point deletes at the local filesystem store.
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+  # Keep the single-binary pod's footprint modest.
+  server:
+    grpc_server_max_recv_msg_size: 8388608
+    grpc_server_max_send_msg_size: 8388608
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: local-path
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+# Disable the microservices-mode components + heavy extras.
+backend: { replicas: 0 }
+read: { replicas: 0 }
+write: { replicas: 0 }
+chunksCache: { enabled: false }
+resultsCache: { enabled: false }
+gateway: { enabled: false }
+lokiCanary: { enabled: false }
+test: { enabled: false }
+
+monitoring:
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+  serviceMonitor:
+    enabled: true

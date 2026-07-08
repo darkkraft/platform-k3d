@@ -1,0 +1,39 @@
+# monitoring-config — the observability "glue" that rides on top of
+# kube-prometheus-stack: alert rules, synthetic probes, Grafana dashboards +
+# datasources (sidecar-discovered), and the Grafana admin credential from Vault.
+
+namespace: monitoring
+
+# Label kube-prometheus-stack's selectors match (also covered by
+# ruleSelectorNilUsesHelmValues=false, but explicit is clearer).
+prometheusReleaseLabel: kube-prometheus-stack
+
+# Application services (in the app namespace) that expose /metrics + get probed.
+appNamespace: app
+apps:
+  # Probe the in-cluster Service (the sslip.io ingress host resolves to the
+  # blackbox pod's own localhost from inside the cluster). Netpol allows
+  # monitoring -> app on the app port.
+  - name: api-service
+    probeURL: http://api-service.app.svc.cluster.local:8080/healthz
+  - name: inventory-service
+    probeURL: http://inventory-service.app.svc.cluster.local:8081/healthz
+
+# RED alert thresholds.
+thresholds:
+  errorRatio: 0.05 # >5% 5xx over 5m -> warning
+  latencyP95Seconds: 0.5 # p95 > 500ms over 10m -> warning
+
+blackbox:
+  proberURL: blackbox-exporter.monitoring.svc.cluster.local:9115
+  module: http_2xx
+
+loki:
+  url: http://loki.monitoring.svc.cluster.local:3100
+
+grafana:
+  # Grafana admin secret materialised by ESO from Vault (no plaintext in git).
+  adminSecretName: grafana-admin
+  clusterSecretStore: vault-backend
+  vaultKey: monitoring/grafana # under the ClusterSecretStore's KV mount
+  refreshInterval: 1h

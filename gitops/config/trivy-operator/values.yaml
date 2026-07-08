@@ -1,0 +1,25 @@
+# Trivy Operator — continuous in-cluster vulnerability + config-audit scanning
+# (complements the pre-merge trivy scan in CI). Sandbox-sized.
+trivy:
+  ignoreUnfixed: true
+  # More headroom + fewer parallel scans avoids the shared trivy cache/db lock
+  # ("cache may be in use by another process") we hit on the first run.
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 768Mi }
+
+operator:
+  # Serialize scans so they don't contend on the trivy cache/db lock.
+  scanJobsConcurrentLimit: 1
+  # Rescan running workloads periodically to catch newly-disclosed CVEs.
+  vulnerabilityScannerScanOnlyCurrentRevisions: true
+  configAuditScannerScanOnlyCurrentRevisions: true
+  metricsFindingsEnabled: true
+
+# Operator pod was OOMKilled at 256Mi -> give it real headroom.
+resources:
+  requests: { cpu: 50m, memory: 256Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+
+serviceMonitor:
+  enabled: true

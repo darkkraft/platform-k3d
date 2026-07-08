@@ -1,0 +1,4 @@
+# Portal — staging overlay: live Grafana widget with server-side creds.
+environment: staging
+grafanaWidget:
+  enabled: true

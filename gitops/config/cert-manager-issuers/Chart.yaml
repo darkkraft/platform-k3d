@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cert-manager-issuers
+description: A self-signed root CA and cluster issuers so ingress hosts get locally-trusted TLS certs (no external ACME in the sandbox).
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

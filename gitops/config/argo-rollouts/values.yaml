@@ -1,0 +1,18 @@
+# Argo Rollouts controller — drives the blue-green strategy for the microservice
+# Rollouts. Installs the Rollout CRDs and a single controller (sandbox-sized).
+installCRDs: true
+
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 192Mi
+
+# Dashboard/notifications off for the sandbox (kubectl-argo-rollouts plugin is
+# enough to inspect/promote); enable the dashboard in prod if a UI is wanted.
+dashboard:
+  enabled: false

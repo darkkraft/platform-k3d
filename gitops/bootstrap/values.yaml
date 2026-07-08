@@ -1,0 +1,264 @@
+# Bootstrap values — the SINGLE source of truth for WHAT runs and in what order,
+# shared by every environment (no per-env copies). `environment` and `profile`
+# are injected by the ArgoCD root Application (Terraform argocd module); apps
+# flagged `envOverlay: true` automatically layer gitops/config/<name>/<env>.yaml,
+# and apps flagged `heavy: true` are skipped in the 'tiny' profile. Add/remove a
+# component or bump a chart here and merge; ArgoCD reconciles. No tofu apply.
+
+git:
+  repoURL: https://github.com/example-org/platform-gitops.git
+  targetRevision: main
+
+cluster:
+  server: https://kubernetes.default.svc
+
+argocdNamespace: argocd
+environment: ""   # injected per-env by the root Application
+
+# Resource profile (full|tiny); injected by the root app. tiny skips heavy apps.
+profile: full
+# Chart repositories (kept beside the pins for readability).
+# external-secrets   https://charts.external-secrets.io
+# cloudnative-pg     https://cloudnative-pg.github.io/charts
+# hashicorp          https://helm.releases.hashicorp.com
+# prometheus-comm.   https://prometheus-community.github.io/helm-charts
+# grafana            https://grafana.github.io/helm-charts
+# kyverno            https://kyverno.github.io/kyverno
+# aqua               https://aquasecurity.github.io/helm-charts
+
+apps:
+  # ---- wave 0: operators, CRDs, secret backend ----
+  - name: prometheus-operator-crds
+    enabled: true
+    wave: 0
+    project: monitoring
+    namespace: monitoring
+    chartRepo: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-operator-crds
+    chartVersion: 30.0.1
+
+  - name: argo-rollouts
+    enabled: true
+    wave: 0
+    project: platform
+    namespace: argo-rollouts
+    chartRepo: https://argoproj.github.io/argo-helm
+    chart: argo-rollouts
+    chartVersion: 2.41.0
+    valueFiles:
+      - gitops/config/argo-rollouts/values.yaml
+
+  - name: external-secrets
+    enabled: true
+    wave: 0
+    project: platform
+    namespace: external-secrets
+    chartRepo: https://charts.external-secrets.io
+    chart: external-secrets
+    chartVersion: 2.7.0
+    valueFiles:
+      - gitops/config/external-secrets/values.yaml
+
+  - name: cloudnative-pg
+    enabled: true
+    wave: 0
+    project: platform
+    namespace: cnpg-system
+    chartRepo: https://cloudnative-pg.github.io/charts
+    chart: cloudnative-pg
+    chartVersion: 0.29.0
+    valueFiles:
+      - gitops/config/cloudnative-pg/values.yaml
+
+  - name: vault
+    enabled: true
+    wave: 0
+    project: platform
+    namespace: vault
+    chartRepo: https://helm.releases.hashicorp.com
+    chart: vault
+    chartVersion: 0.34.0
+    valueFiles:
+      - gitops/config/vault/values.yaml
+
+  - name: kyverno
+    enabled: true
+    wave: 0
+    project: platform
+    namespace: kyverno
+    chartRepo: https://kyverno.github.io/kyverno
+    chart: kyverno
+    chartVersion: 3.8.1
+    valueFiles:
+      - gitops/config/kyverno/values.yaml
+
+  - name: forgejo-runner
+    enabled: true
+    wave: 0
+    project: platform
+    namespace: forgejo
+    path: gitops/config/forgejo-runner
+    valueFiles:
+      - gitops/config/forgejo-runner/values.yaml
+
+  - name: cert-manager
+    enabled: true
+    wave: 0
+    project: platform
+    namespace: cert-manager
+    chartRepo: https://charts.jetstack.io
+    chart: cert-manager
+    chartVersion: v1.20.3
+    valueFiles:
+      - gitops/config/cert-manager/values.yaml
+
+  # ---- wave 1: cluster resources that depend on the operators ----
+  - name: cert-manager-issuers
+    enabled: true
+    wave: 1
+    project: platform
+    namespace: cert-manager
+    path: gitops/config/cert-manager-issuers
+    valueFiles:
+      - gitops/config/cert-manager-issuers/values.yaml
+
+  - name: secret-store
+    enabled: true
+    envOverlay: true   # appends gitops/config/secret-store/<env>.yaml (env from the root app)
+    wave: 1
+    project: platform
+    namespace: app
+    path: gitops/config/secret-store
+    valueFiles:
+      - gitops/config/secret-store/values.yaml
+
+  - name: cnpg-cluster
+    enabled: true
+    envOverlay: true   # appends gitops/config/cnpg-cluster/<env>.yaml (env from the root app)
+    wave: 1
+    project: platform
+    namespace: app
+    path: gitops/config/cnpg-cluster
+    valueFiles:
+      - gitops/config/cnpg-cluster/values.yaml
+
+  - name: network-policies
+    enabled: true
+    wave: 1
+    project: platform
+    namespace: app
+    path: gitops/config/network-policies
+    valueFiles:
+      - gitops/config/network-policies/values.yaml
+
+  # ---- wave 2: application workloads + policies ----
+  - name: api-service
+    enabled: true
+    envOverlay: true   # appends gitops/config/api-service/<env>.yaml (env from the root app)
+    wave: 2
+    project: apps
+    namespace: app
+    path: charts/microservice
+    valueFiles:
+      - gitops/config/api-service/values.yaml
+
+  - name: inventory-service
+    enabled: true
+    envOverlay: true   # appends gitops/config/inventory-service/<env>.yaml (env from the root app)
+    wave: 2
+    project: apps
+    namespace: app
+    path: charts/microservice
+    valueFiles:
+      - gitops/config/inventory-service/values.yaml
+
+  - name: kyverno-policies
+    enabled: true
+    envOverlay: true   # appends gitops/config/kyverno-policies/<env>.yaml (env from the root app)
+    wave: 2
+    project: platform
+    namespace: kyverno
+    path: gitops/config/kyverno-policies
+    valueFiles:
+      - gitops/config/kyverno-policies/values.yaml
+
+  # ---- wave 3: observability ----
+  - name: kube-prometheus-stack
+    enabled: true
+    envOverlay: true   # appends gitops/config/kube-prometheus-stack/<env>.yaml (env from the root app)
+    wave: 3
+    project: monitoring
+    namespace: monitoring
+    chartRepo: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    chartVersion: 87.10.1
+    valueFiles:
+      - gitops/config/kube-prometheus-stack/values.yaml
+
+  - name: loki
+    enabled: true
+    heavy: true       # skipped in the 'tiny' profile
+    wave: 3
+    project: monitoring
+    namespace: monitoring
+    chartRepo: https://grafana.github.io/helm-charts
+    chart: loki
+    chartVersion: 7.0.0
+    valueFiles:
+      - gitops/config/loki/values.yaml
+
+  - name: alloy
+    enabled: true
+    heavy: true       # skipped in the 'tiny' profile
+    wave: 3
+    project: monitoring
+    namespace: monitoring
+    chartRepo: https://grafana.github.io/helm-charts
+    chart: alloy
+    chartVersion: 1.10.0
+    valueFiles:
+      - gitops/config/alloy/values.yaml
+
+  - name: blackbox-exporter
+    enabled: true
+    heavy: true       # skipped in the 'tiny' profile
+    wave: 3
+    project: monitoring
+    namespace: monitoring
+    chartRepo: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-blackbox-exporter
+    chartVersion: 11.15.1
+    valueFiles:
+      - gitops/config/blackbox-exporter/values.yaml
+
+  - name: trivy-operator
+    enabled: true
+    heavy: true       # skipped in the 'tiny' profile
+    wave: 3
+    project: platform
+    namespace: trivy-system
+    chartRepo: https://aquasecurity.github.io/helm-charts
+    chart: trivy-operator
+    chartVersion: 0.34.0
+    valueFiles:
+      - gitops/config/trivy-operator/values.yaml
+
+  - name: monitoring-config
+    enabled: true
+    wave: 3
+    project: monitoring
+    namespace: monitoring
+    path: gitops/config/monitoring-config
+    valueFiles:
+      - gitops/config/monitoring-config/values.yaml
+
+  # ---- portal: central dashboard, auto-discovers every annotated ingress ----
+  - name: portal
+    enabled: true
+    envOverlay: true   # appends gitops/config/portal/<env>.yaml (env from the root app)
+    wave: 4
+    project: platform
+    namespace: portal
+    path: gitops/config/portal
+    valueFiles:
+      - gitops/config/portal/values.yaml

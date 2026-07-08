@@ -1,0 +1,23 @@
+# Loki datasource, discovered by the Grafana sidecar (label grafana_datasource).
+# Prometheus is already wired as the default datasource by kube-prometheus-stack.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource-loki
+  namespace: {{ .Values.namespace }}
+  labels:
+    grafana_datasource: "1"
+    {{- include "monitoring-config.labels" . | nindent 4 }}
+data:
+  loki-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: {{ .Values.loki.url }}
+        isDefault: false
+        editable: true
+        jsonData:
+          maxLines: 1000

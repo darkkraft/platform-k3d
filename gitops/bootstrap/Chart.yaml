@@ -1,0 +1,6 @@
+apiVersion: v2
+name: bootstrap
+description: App-of-apps root. Renders one ArgoCD Application per platform component from a declarative, per-environment apps list.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

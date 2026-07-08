@@ -1,0 +1,13 @@
+# api-service — dev overlay. HPA floors at 2 for real HA even in dev (apps are
+# tiny); prod floors at 3. PDB kept off in dev to never block single-node drains.
+hpa:
+  minReplicas: 2          # HPA owns the count (2→6)
+podDisruptionBudget:
+  enabled: false
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi

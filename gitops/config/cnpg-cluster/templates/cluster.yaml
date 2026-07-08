@@ -1,0 +1,50 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.cluster.name }}
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: argocd
+spec:
+  instances: {{ .Values.cluster.instances }}
+  imageName: {{ .Values.cluster.imageName }}
+
+  affinity:
+    # Keep replicas off the same node when there is more than one.
+    enablePodAntiAffinity: {{ .Values.cluster.enablePodAntiAffinity }}
+
+  storage:
+    size: {{ .Values.cluster.storage.size }}
+    storageClass: {{ .Values.cluster.storage.storageClass }}
+
+  resources:
+    {{- toYaml .Values.cluster.resources | nindent 4 }}
+
+  monitoring:
+    enablePodMonitor: {{ .Values.cluster.monitoring.enablePodMonitor }}
+
+  postgresql:
+    parameters:
+      {{- toYaml .Values.cluster.postgresql.parameters | nindent 6 }}
+
+  # Declarative role management. CNPG creates each role and sets its password from
+  # the referenced basic-auth secret (produced by ESO from Vault).
+  managed:
+    roles:
+      {{- range .Values.roles }}
+      - name: {{ .name }}
+        ensure: present
+        login: {{ .login }}
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: {{ .passwordSecret }}
+      {{- end }}
+
+  bootstrap:
+    initdb:
+      # A neutral bootstrap database; application databases are created via the
+      # Database CRD below and owned by their service roles.
+      database: app
+      owner: app

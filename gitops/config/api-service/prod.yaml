@@ -1,0 +1,17 @@
+# api-service — prod overlay. Three replicas, PDB, higher limits.
+# Manual blue-green promotion gate: green is deployed + health-checked, but a human
+# promotes it to live traffic (prod's explicit promotion control).
+rollout:
+  autoPromotionEnabled: false
+hpa:
+  minReplicas: 3          # prod floors at 3 for HA; HPA owns the count (3→6)
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

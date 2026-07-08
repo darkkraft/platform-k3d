@@ -1,0 +1,39 @@
+{{- /*
+App-of-apps renderer. One ArgoCD Application per enabled entry in
+.Values.apps. The per-app spec lives in a raw file under app-templates/ loaded
+with $.Files.Get and rendered with `tpl`, so adding an app = a values entry (and,
+only for a genuinely new shape, a new template). Template is chosen by:
+  - explicit  $app.template
+  - else "generic-helm" when the app pins an upstream chart ($app.chart)
+  - else "generic-path" for an in-repo path.
+Render context = the app entry merged over shared cluster/git facts, so app
+fields win (last-wins merge).
+*/}}
+{{- include "bootstrap.validate" . -}}
+{{- $profile := .Values.profile | default "full" -}}
+{{- $env := .Values.environment -}}
+{{- $shared := dict "git" .Values.git "cluster" .Values.cluster "argocdNamespace" (.Values.argocdNamespace | default "argocd") "environment" $env -}}
+{{- range $app := .Values.apps }}
+{{- if $app.enabled }}
+{{- /* In the "tiny" profile, skip apps flagged heavy: true (resource-constrained host). */ -}}
+{{- if not (and (eq $profile "tiny") ($app.heavy | default false)) }}
+{{- $tpl := $app.template | default (hasKey $app "chart" | ternary "generic-helm" "generic-path") }}
+{{- $raw := $.Files.Get (printf "app-templates/%s.yaml" $tpl) }}
+{{- if not $raw }}{{ fail (printf "app %q: missing app-templates/%s.yaml" $app.name $tpl) }}{{ end }}
+{{- /* Build the render context. For envOverlay apps, derive the per-env value
+       file from the base valueFile's dir + <environment> and append it — this is
+       what replaces the old per-env values-<env>.yaml copies. Requires the base
+       valueFile to be gitops/config/<name>/values.yaml (repo convention). */ -}}
+{{- $ctx := deepCopy $app }}
+{{- if $app.envOverlay }}
+{{- if not $env }}{{ fail (printf "app %q: envOverlay set but .environment is empty (root app must inject it)" $app.name) }}{{ end }}
+{{- $base := index $app.valueFiles 0 }}
+{{- $overlay := printf "%s%s.yaml" (trimSuffix "values.yaml" $base) $env }}
+{{- $_ := set $ctx "valueFiles" (append (deepCopy $app.valueFiles) $overlay) }}
+{{- end }}
+---
+# {{ $app.name }} ({{ $tpl }}) — sync-wave {{ $app.wave | default 0 }}{{ if $app.envOverlay }} — overlay {{ $env }}{{ end }}
+{{ tpl $raw (merge $ctx $shared) }}
+{{- end }}
+{{- end }}
+{{- end }}

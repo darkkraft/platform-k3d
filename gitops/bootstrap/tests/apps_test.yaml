@@ -1,0 +1,49 @@
+suite: app-of-apps renderer
+templates:
+  - templates/applications.yaml
+tests:
+  - it: renders every app in the full profile
+    set:
+      environment: dev
+      profile: full
+    asserts:
+      - hasDocuments:
+          count: 22
+
+  - it: skips the heavy apps in the tiny profile
+    set:
+      environment: dev
+      profile: tiny
+    asserts:
+      # full is 22; tiny drops loki, alloy, blackbox-exporter, trivy-operator.
+      - hasDocuments:
+          count: 18
+
+  - it: derives the per-env overlay for envOverlay apps (staging)
+    set:
+      environment: staging
+    documentSelector:
+      path: metadata.name
+      value: api-service
+    asserts:
+      - contains:
+          path: spec.sources[0].helm.valueFiles
+          content: $values/gitops/config/api-service/values.yaml
+      - contains:
+          path: spec.sources[0].helm.valueFiles
+          content: $values/gitops/config/api-service/staging.yaml
+
+  - it: fails fast when git.repoURL is unset
+    set:
+      environment: dev
+      git.repoURL: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: git.repoURL must be set (values.yaml or the root app's valuesObject)
+
+  - it: fails when an envOverlay app is rendered without an environment
+    set:
+      environment: ""
+      git.repoURL: https://example.com/repo.git
+    asserts:
+      - failedTemplate: {}
