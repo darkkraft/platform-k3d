@@ -1,0 +1,113 @@
+# -----------------------------------------------------------------------------
+# CI job image for the self-hosted Forgejo Actions runner.
+#
+# Why this exists: Forgejo runs each `runs-on: docker` job inside a container.
+# The stock `node:20-bookworm` lacks our toolchain, so the workflows used to
+# `curl … | sh` installers (from unpinned `master`/`main`) on every run —
+# ugly, slow, and a supply-chain risk. Instead we bake the EXACT `.tool-versions`
+# toolchain into one pinned image, built + pushed to the k3d registry (same
+# pattern as the app images) and pulled by the runner's DinD. Workflows then just
+# call the binaries — no runtime installers.
+#
+# Base is node:20-bookworm (digest-pinned) so JS actions (checkout@v4, …) still
+# run. The Rust toolchain, docker CLI, and trivy come from digest/tag-pinned
+# upstream images via multi-stage COPY; the remaining tools are pinned release
+# binaries verified by SHA256 against each vendor's published checksums.
+# -----------------------------------------------------------------------------
+FROM rust:1.88-bookworm AS rust
+FROM docker:27.5.1-cli AS dockercli
+# trivy 0.58.1 (matches .tool-versions) — pinned OCI image, durable unlike its GH release tarballs.
+FROM ghcr.io/aquasecurity/trivy:0.58.1 AS trivy
+
+FROM node:20-bookworm@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
+
+# Tool versions — kept in lockstep with /.tool-versions (the single source of truth).
+ENV KUBECONFORM_VERSION=0.6.7 \
+    GITLEAKS_VERSION=8.21.2 \
+    TOFU_VERSION=1.11.2 \
+    TERRAGRUNT_VERSION=0.67.16 \
+    HELM_VERSION=3.17.1 \
+    TFLINT_VERSION=0.55.1
+
+# Rust toolchain (cargo, rustc, clippy — same pinned image the app builds use),
+# docker CLI (for `docker build` against DinD), and the trivy binary.
+COPY --from=rust /usr/local/cargo /usr/local/cargo
+COPY --from=rust /usr/local/rustup /usr/local/rustup
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+# Base OS deps: git (checkout), ca-certs/curl (downloads), tar/unzip (archives),
+# shellcheck (scripts CI job), and build-essential + pkg-config so cargo can
+# link the Rust binaries.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl git unzip tar shellcheck build-essential pkg-config; \
+    rm -rf /var/lib/apt/lists/*
+
+# Pinned tool binaries. Each archive is downloaded under its ORIGINAL name so the
+# vendor checksums file verifies it directly, then extracted and installed.
+# TARGETARCH is set by BuildKit to the build platform's arch (amd64 on Linux/
+# Intel, arm64 on Apple-Silicon colima), so the runner image is correct on both.
+ARG TARGETARCH
+RUN set -eux; \
+    arch="${TARGETARCH:-amd64}"; \
+    case "$arch" in amd64|arm64) ;; *) echo "unsupported TARGETARCH: $arch" >&2; exit 1;; esac; \
+    gitleaks_arch="$arch"; [ "$arch" = "amd64" ] && gitleaks_arch=x64; \
+    tmp="$(mktemp -d)"; cd "$tmp"; \
+    dl() { curl -fsSL --retry 3 -O "$1"; }; \
+    \
+    # kubeconform
+    dl "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-${arch}.tar.gz"; \
+    dl "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/CHECKSUMS"; \
+    grep "kubeconform-linux-${arch}.tar.gz" CHECKSUMS | sha256sum -c -; \
+    tar -xzf "kubeconform-linux-${arch}.tar.gz" kubeconform; install -m0755 kubeconform /usr/local/bin/kubeconform; \
+    \
+    # gitleaks
+    dl "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${gitleaks_arch}.tar.gz"; \
+    dl "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"; \
+    grep "gitleaks_${GITLEAKS_VERSION}_linux_${gitleaks_arch}.tar.gz" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -; \
+    tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_${gitleaks_arch}.tar.gz" gitleaks; install -m0755 gitleaks /usr/local/bin/gitleaks; \
+    \
+    # OpenTofu
+    dl "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_${arch}.zip"; \
+    dl "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_SHA256SUMS"; \
+    grep "tofu_${TOFU_VERSION}_linux_${arch}.zip" "tofu_${TOFU_VERSION}_SHA256SUMS" | sha256sum -c -; \
+    unzip -o "tofu_${TOFU_VERSION}_linux_${arch}.zip" tofu; install -m0755 tofu /usr/local/bin/tofu; \
+    \
+    # Terragrunt (single binary; SHA256SUMS references the binary name directly)
+    dl "https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_${arch}"; \
+    dl "https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/SHA256SUMS"; \
+    grep "terragrunt_linux_${arch}\$" SHA256SUMS | sha256sum -c -; \
+    install -m0755 "terragrunt_linux_${arch}" /usr/local/bin/terragrunt; \
+    \
+    # Helm (.sha256sum file already contains "<hash>  <tarball-name>")
+    dl "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${arch}.tar.gz"; \
+    dl "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${arch}.tar.gz.sha256sum"; \
+    sha256sum -c "helm-v${HELM_VERSION}-linux-${arch}.tar.gz.sha256sum"; \
+    tar -xzf "helm-v${HELM_VERSION}-linux-${arch}.tar.gz" "linux-${arch}/helm"; \
+    install -m0755 "linux-${arch}/helm" /usr/local/bin/helm; \
+    \
+    # tflint (Terraform/OpenTofu linter)
+    dl "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_${arch}.zip"; \
+    dl "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/checksums.txt"; \
+    grep "tflint_linux_${arch}.zip" checksums.txt | sha256sum -c -; \
+    unzip -o "tflint_linux_${arch}.zip" tflint; install -m0755 tflint /usr/local/bin/tflint; \
+    \
+    cd /; rm -rf "$tmp"
+
+# helm-unittest plugin (pinned) for the chart-logic unit tests in ci-infra.
+ENV HELM_UNITTEST_VERSION=0.5.1
+RUN set -eux; \
+    helm plugin install https://github.com/helm-unittest/helm-unittest --version "${HELM_UNITTEST_VERSION}"; \
+    helm unittest --help >/dev/null
+
+# Smoke-check every tool resolves (fail the image build, not the CI run).
+RUN set -eux; \
+    node --version; docker --version; \
+    cargo --version; rustc --version; cargo clippy --version; \
+    kubeconform -v; trivy --version; \
+    gitleaks version; tofu version; terragrunt --version; helm version --short; \
+    tflint --version; shellcheck --version; helm unittest --help >/dev/null

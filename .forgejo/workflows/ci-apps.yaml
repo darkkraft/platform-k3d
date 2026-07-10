@@ -1,0 +1,100 @@
+# Application CI — runs on the in-cluster Forgejo Actions runner.
+# GitHub-Actions syntax (portable): the same file runs unchanged on GitHub
+# (there, actions/setup-* would provision the toolchain; on the self-hosted
+# runner the job image already carries it — see .forgejo/Dockerfile.ci).
+name: ci-apps
+
+on:
+  workflow_dispatch: {} # allow manual re-runs (ops / after runner changes)
+  push:
+    paths:
+      - "apps/**"
+      - ".forgejo/workflows/ci-apps.yaml"
+  pull_request:
+    paths:
+      - "apps/**"
+
+jobs:
+  test-build-scan:
+    runs-on: docker
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api-service, inventory-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      # All tools (rust/cargo, docker, trivy) are baked into the CI job image at
+      # pinned .tool-versions versions — no runtime installs.
+      - name: clippy
+        working-directory: apps/${{ matrix.service }}
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        working-directory: apps/${{ matrix.service }}
+        run: cargo test
+
+      - name: dependency vuln scan (trivy fs, JSON report + gate on HIGH/CRITICAL)
+        run: |
+          trivy fs --scanners vuln --format json -o "trivy-fs-${{ matrix.service }}.json" --severity HIGH,CRITICAL --ignore-unfixed apps/${{ matrix.service }} || true
+          trivy fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed apps/${{ matrix.service }}   # gates the build
+
+      - name: build image
+        run: docker build -t ${{ matrix.service }}:${{ github.sha }} apps/${{ matrix.service }}
+
+      - name: trivy image scan (JSON report + gate on HIGH/CRITICAL)
+        run: |
+          trivy image --format json -o "trivy-${{ matrix.service }}.json" --severity HIGH,CRITICAL --ignore-unfixed ${{ matrix.service }}:${{ github.sha }} || true
+          trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed ${{ matrix.service }}:${{ github.sha }}   # gates the build
+
+      # Publish machine-readable scan results as run artifacts (downloadable from
+      # the run). No SARIF/Security-tab upload — Forgejo has no code-scanning UI;
+      # a JSON artifact is the portable equivalent. The steps above still gate.
+      - name: upload scan reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: scan-reports-${{ matrix.service }}
+          path: |
+            trivy-${{ matrix.service }}.json
+            trivy-fs-${{ matrix.service }}.json
+          if-no-files-found: warn
+
+      # On main, publish the SHA-tagged image to the cluster registry so a
+      # subsequent image-bump PR can deploy it. Deployment is ALWAYS a separate,
+      # reviewable tag-bump PR (see image-bump.yaml) — CI never deploys directly.
+      #
+      # Target = the in-cluster k3d registry. The runner's DinD reaches it at
+      # k3d-platform-registry:5000 (its network alias + internal port; already added
+      # as an --insecure-registry on the DinD daemon in gitops/config/forgejo-
+      # runner). The SAME registry is what the nodes pull from at
+      # k3d-platform-registry:5111 (host-published port), so an image pushed here is
+      # immediately pullable by a Deployment referencing k3d-platform-registry:5111/
+      # <svc>:<sha> — which is exactly the ref image-bump writes into the overlay.
+      # (Swap REGISTRY for GHCR + a `docker login` from secrets when running on
+      # GitHub against a real registry; the tag/push shape is identical.)
+      - name: push image to cluster registry (main only)
+        if: github.ref == 'refs/heads/main'
+        env:
+          REGISTRY: k3d-platform-registry:5000
+        run: |
+          set -euo pipefail
+          docker tag  "${{ matrix.service }}:${{ github.sha }}" "$REGISTRY/${{ matrix.service }}:${{ github.sha }}"
+          docker push "$REGISTRY/${{ matrix.service }}:${{ github.sha }}"
+          echo "pushed $REGISTRY/${{ matrix.service }}:${{ github.sha }} — deploy it with the image-bump workflow"
+
+  gitleaks:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (repo-wide secret scan, JSON report + gate)
+        run: gitleaks detect --source . --no-banner --redact --report-format json --report-path gitleaks.json
+      - name: upload gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: gitleaks-report
+          path: gitleaks.json
+          if-no-files-found: warn

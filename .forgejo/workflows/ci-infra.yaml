@@ -1,0 +1,102 @@
+# Infrastructure CI — Terraform/Terragrunt + Helm/GitOps validation.
+# Runs on the in-cluster Forgejo Actions runner; the job image carries the pinned
+# toolchain (.forgejo/Dockerfile.ci), so there are no runtime tool installs.
+name: ci-infra
+
+on:
+  workflow_dispatch: {} # allow manual re-runs (ops / after runner changes)
+  push:
+    paths:
+      - "terraform/**"
+      - "stages/**"
+      - "gitops/**"
+      - "charts/**"
+      - ".forgejo/workflows/ci-infra.yaml"
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "stages/**"
+      - "gitops/**"
+      - "charts/**"
+
+jobs:
+  terraform:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: tofu fmt (check)
+        run: tofu fmt -check -recursive terraform/
+      - name: tofu validate (all three roots)
+        run: |
+          for d in terraform/cluster terraform/bootstrap terraform/services; do
+            (cd "$d" && tofu init -backend=false -input=false && tofu validate)
+          done
+      # Hard gate (no || true): documented+typed variables, no unused
+      # declarations, pinned versions — across every root AND module.
+      - name: tflint
+        run: tflint --chdir=terraform --recursive
+      # Module-contract unit tests (validation rules) — `tofu test`, no cluster.
+      - name: tofu test (module variable contracts)
+        run: |
+          for m in terraform/modules/*/tests; do
+            d="$(dirname "$m")"
+            echo "== tofu test: $d =="
+            (cd "$d" && tofu init -backend=false -input=false >/dev/null && tofu test)
+          done
+
+  terragrunt:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: terragrunt hcl fmt (check)
+        run: terragrunt hclfmt --terragrunt-check --terragrunt-working-dir stages
+
+  tfsec:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      # IaC misconfig scan of the whole repo. trivy is baked into the job image
+      # (previously this used the Docker-based trivy-action, which does not run on
+      # the self-hosted Forgejo runner).
+      - name: trivy config (IaC misconfig scan)
+        # Skip .archive (the original challenge's pre-remediation charts, kept only
+        # as the audit "before" — not deployed) so the scan reflects live infra.
+        run: trivy config --severity HIGH,CRITICAL --skip-dirs .archive --exit-code 0 .   # report first; flip to 1 to gate
+
+  helm:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: helm lint
+        run: |
+          helm lint charts/microservice gitops/bootstrap \
+            gitops/config/cnpg-cluster gitops/config/secret-store \
+            gitops/config/monitoring-config gitops/config/network-policies \
+            gitops/config/kyverno-policies gitops/config/portal
+      - name: kubeconform (rendered manifests)
+        run: |
+          helm template ms charts/microservice \
+            -f gitops/config/api-service/values.yaml -f gitops/config/api-service/dev.yaml \
+            | kubeconform -strict -ignore-missing-schemas -summary
+          # Render the app-of-apps for every environment + the tiny profile
+          # (environment/profile are injected by the root app at runtime; here
+          # we pass them with --set so the render matches each env).
+          for env in dev staging prod; do
+            echo "== bootstrap render: $env =="
+            helm template root gitops/bootstrap --set environment=$env \
+              | kubeconform -strict -ignore-missing-schemas -summary
+          done
+          helm template root gitops/bootstrap --set environment=dev --set profile=tiny \
+            | kubeconform -strict -ignore-missing-schemas -summary
+      - name: helm unittest (chart logic)
+        run: |
+          helm unittest charts/microservice gitops/bootstrap
+
+  shellcheck:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      # Gate on warning+ (real bugs); info-level style (color vars in printf) is
+      # an accepted, documented pattern — see .shellcheckrc.
+      - name: shellcheck (scripts)
+        run: shellcheck -x --severity=warning scripts/*.sh

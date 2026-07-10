@@ -1,0 +1,54 @@
+# Declarative deploy: bump a service's image tag in the env overlay and open a
+# PR. Merging the PR is the deploy (ArgoCD reconciles); rollback = revert the PR.
+# dev = low-friction; staging/prod PRs require review (the promotion control).
+name: image-bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: api-service | inventory-service
+        required: true
+      image_tag:
+        description: image tag to deploy (git SHA)
+        required: true
+      environment:
+        description: dev | staging | prod
+        required: true
+        default: dev
+
+jobs:
+  open-bump-pr:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install yq
+        run: |
+          curl -sSLo /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: bump image tag in env overlay
+        run: |
+          set -euo pipefail
+          f="gitops/config/${{ inputs.service }}/${{ inputs.environment }}.yaml"
+          yq -i '.image.tag = "${{ inputs.image_tag }}"' "$f"
+          echo "updated $f:"; grep -A2 '^image:' "$f" || yq '.image' "$f"
+
+      - name: open PR
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          BR="bump/${{ inputs.service }}-${{ inputs.environment }}-${{ inputs.image_tag }}"
+          git config user.name  "ci-image-bump"
+          git config user.email "ci@platform.local"
+          git checkout -b "$BR"
+          git commit -am "deploy(${{ inputs.environment }}): ${{ inputs.service }} -> ${{ inputs.image_tag }}"
+          git push -f origin "$BR"
+          # Forgejo API (same host the runner registered against).
+          curl -fsS -X POST \
+            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            "${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/pulls" \
+            -d "{\"head\":\"${BR}\",\"base\":\"main\",\"title\":\"deploy(${{ inputs.environment }}): ${{ inputs.service }} -> ${{ inputs.image_tag }}\",\"body\":\"Automated image-tag bump. Merge to deploy via ArgoCD; revert to roll back.\"}"
