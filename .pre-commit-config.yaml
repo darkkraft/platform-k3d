@@ -1,0 +1,65 @@
+# Pre-commit mirrors the CI gates so problems are caught before push.
+#   pip install pre-commit && pre-commit install
+minimum_pre_commit_version: "3.5.0"
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        # Helm templates aren't valid YAML on their own.
+        exclude: '(charts/.*/templates/|gitops/.*/templates/|app-templates/|\.forgejo/)'
+
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.2
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_tflint
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+
+  - repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.25
+    hooks:
+      - id: terragrunt-hclfmt
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: [-x, --severity=warning]
+
+  - repo: local
+    hooks:
+      - id: cargo-test
+        name: cargo test (apps)
+        language: system
+        pass_filenames: false
+        files: '^apps/.*\.rs$'
+        entry: bash -c 'for s in api-service inventory-service; do (cd "apps/$s" && cargo test) || exit 1; done'
+      - id: helm-lint
+        name: helm lint
+        language: system
+        pass_filenames: false
+        files: '^(charts|gitops)/.*'
+        entry: bash -c 'helm lint charts/microservice gitops/bootstrap gitops/config/cnpg-cluster gitops/config/secret-store gitops/config/monitoring-config gitops/config/network-policies gitops/config/kyverno-policies gitops/config/portal'
+      - id: helm-unittest
+        name: helm unittest (chart logic)
+        language: system
+        pass_filenames: false
+        files: '^(charts/microservice|gitops/bootstrap)/.*'
+        entry: bash -c 'helm unittest charts/microservice gitops/bootstrap'
+      - id: tofu-test
+        name: tofu test (module contracts)
+        language: system
+        pass_filenames: false
+        files: '^terraform/modules/.*\.(tf|tftest\.hcl)$'
+        entry: bash -c 'for m in terraform/modules/*/tests; do d="$(dirname "$m")"; (cd "$d" && tofu init -backend=false >/dev/null && tofu test) || exit 1; done'

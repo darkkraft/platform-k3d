@@ -1,0 +1,16 @@
+# Reproducible toolchain. Install everything with `mise install` (or `asdf install`).
+# Pins the exact versions CI and local runs use — no manual binary downloads.
+opentofu 1.11.2
+terragrunt 0.67.16
+k3d 5.7.5
+kubectl 1.31.5
+helm 3.17.1
+rust 1.88.0
+kubeconform 0.6.7
+trivy 0.58.1
+tflint 0.55.1
+gitleaks 8.21.2
+shellcheck 0.10.0
+pre-commit 4.0.1
+yq 4.44.3
+jq 1.7.1

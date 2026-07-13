@@ -1,0 +1,10 @@
+# ShellCheck config for scripts/.
+# CI gates on --severity=warning (real bugs). The info-level checks below are
+# disabled repo-wide because they flag an intentional, trusted pattern:
+#   SC2059 — variables in printf format strings: our format strings interpolate
+#            ANSI colour constants (C/G/Y/R/D/N) defined at the top of each script.
+#            They are trusted, static, and carry no format directives, so this is
+#            the idiomatic way to colourise output.
+#   SC2028 — echo with escapes: only in a single help-string echo, not runtime logic.
+disable=SC2059
+disable=SC2028

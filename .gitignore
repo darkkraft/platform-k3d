@@ -1,0 +1,64 @@
+# OpenTofu / Terraform
+.terraform/
+.opentofu/
+*.tfstate
+*.tfstate.*
+# Module lock files MUST be committed for reproducible provider selection.
+!.terraform.lock.hcl
+# ...but the per-stage lock files (stages/<env>/<layer>) are terragrunt-generated
+# duplicates that churn per-platform (darwin vs linux provider hashes), flip-
+# flopping between the Mac and Linux clones. The authoritative pins live in the
+# module locks under terraform/*/ — so ignore the stage copies.
+stages/**/.terraform.lock.hcl
+
+# Terragrunt: cache + generated backend/encryption + local state tree
+.terragrunt-cache/
+backend_generated.tf
+encryption_generated.tf
+.tfstate/
+
+# Local archive of superseded files (kept out of git)
+.archive/
+# Secret-bearing var files are never committed; non-secret env tfvars ARE.
+*.auto.tfvars
+*.secret.tfvars
+secrets.auto.tfvars
+
+# Rust (Cargo.lock IS committed for the app binaries — reproducible builds)
+target/
+**/*.rs.bk
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.pem
+*.key
+secrets.yaml
+*.env
+
+# internal
+internal/
+
+# Tooling artifacts
+.codeindex.json
+
+# Playwright MCP scratch (screenshots/snapshots)
+.playwright-mcp/
+
+# Runtime bring-up logs (lazy.sh)
+.lazy-logs/
+
+# Exported kubeconfigs (contain admin certs)
+kubeconfig*.yaml
+
+# Local git bundles are build artifacts, never committed
+*.bundle

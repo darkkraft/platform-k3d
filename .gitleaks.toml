@@ -1,0 +1,23 @@
+# gitleaks config — extends the built-in rules, adds a small, justified allowlist.
+# Auto-loaded by `gitleaks detect` when present at the repo root.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Accepted non-secrets (placeholders / archived baseline)"
+
+# Regexes matched against the detected secret VALUE. These are NOT credentials:
+regexes = [
+  # k3d's local registry is auth-less plain-HTTP; the kreuzwerker/docker provider
+  # still requires a registry_auth block, so we pass the placeholder value
+  # "anonymous" the registry ignores (terraform/cluster/providers.tf).
+  '''anonymous''',
+]
+
+# Paths whose findings are accepted:
+paths = [
+  # The original challenge's monolith with placeholder postgres/root creds — kept
+  # only in history / .archive as the audit "before". Superseded by Vault+ESO.
+  '''terraform/main\.tf''',
+  '''\.archive/.*''',
+]
