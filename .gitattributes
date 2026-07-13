@@ -1,0 +1,6 @@
+# Helm chart templates use Go-template syntax ({{ ... }}) — that's the templating
+# language, not Go source (the apps are Rust). Keep these template partials and
+# rendered-manifest sources out of GitHub's language statistics.
+*.tpl linguist-detectable=false
+charts/**/templates/** linguist-detectable=false
+gitops/**/templates/** linguist-detectable=false
